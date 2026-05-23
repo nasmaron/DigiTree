@@ -2028,7 +2028,7 @@ function Sel({ children, ...props }) {
     width: "100%", background: "#0b1320", border: "1px solid #1a2535",
     borderRadius: 5, padding: "3px 7px", color: "#dde4f0",
     fontSize: 16, fontFamily: "monospace", outline: "none",
-    boxSizing: "border-box", color: "#dde4f0",
+    boxSizing: "border-box",
   }}>{children}</select>;
 }
 
