@@ -3511,6 +3511,56 @@ export default function DigiTree() {
         </div>
       )}
 
+      {/* 読込確認モーダル */}
+      {loadConfirm && (
+        <div style={{ position: "fixed", inset: 0, background: "#000b", zIndex: 400, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setLoadConfirm(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#0f1a28", border: "1px solid #22c55e55", borderRadius: 12, padding: "20px 24px", width: 300, fontFamily: "monospace", display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontSize: 14, color: "#dde4f0", fontWeight: 700 }}>「{loadConfirm.name}」を読み込みますか？</div>
+            <div style={{ fontSize: 11, color: "#7a90a8" }}>現在のツリーは破棄されます</div>
+            <button onClick={() => {
+              historyRef.current = [...historyRef.current.slice(-29), tree];
+              setTree(loadConfirm.tree);
+              idbSet('digitree_tree', loadConfirm.tree).catch(() => {});
+              setLoadConfirm(null); setSaveListOpen(false);
+            }} style={{ padding: "10px 0", borderRadius: 6, cursor: "pointer", background: "#22c55e22", border: "1px solid #22c55e", color: "#22c55e", fontSize: 13, fontWeight: 700 }}>読み込む</button>
+            <button onClick={() => setLoadConfirm(null)} style={{ padding: "8px 0", borderRadius: 6, cursor: "pointer", background: "none", border: "1px solid #2a3a52", color: "#7a90a8", fontSize: 12 }}>キャンセル</button>
+          </div>
+        </div>
+      )}
+
+      {/* 上書き確認モーダル */}
+      {overwriteConfirm && (
+        <div style={{ position: "fixed", inset: 0, background: "#000b", zIndex: 400, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setOverwriteConfirm(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#0f1a28", border: "1px solid #4a9eff55", borderRadius: 12, padding: "20px 24px", width: 300, fontFamily: "monospace", display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontSize: 14, color: "#dde4f0", fontWeight: 700 }}>「{overwriteConfirm.name}」を上書きしますか？</div>
+            <div style={{ fontSize: 11, color: "#7a90a8" }}>現在のツリーで上書き保存します</div>
+            <button onClick={() => {
+              const next = savedTrees.map(e => e.id === overwriteConfirm.id ? { ...e, tree: JSON.parse(JSON.stringify(tree)), savedAt: Date.now() } : e);
+              setSavedTrees(next);
+              idbSet('digitree_saved_trees', next).catch(() => {});
+              setOverwriteConfirm(null);
+            }} style={{ padding: "10px 0", borderRadius: 6, cursor: "pointer", background: "#4a9eff22", border: "1px solid #4a9eff", color: "#4a9eff", fontSize: 13, fontWeight: 700 }}>上書き保存</button>
+            <button onClick={() => setOverwriteConfirm(null)} style={{ padding: "8px 0", borderRadius: 6, cursor: "pointer", background: "none", border: "1px solid #2a3a52", color: "#7a90a8", fontSize: 12 }}>キャンセル</button>
+          </div>
+        </div>
+      )}
+
+      {/* 削除確認モーダル */}
+      {deleteConfirm && (
+        <div style={{ position: "fixed", inset: 0, background: "#000b", zIndex: 400, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setDeleteConfirm(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#0f1a28", border: "1px solid #ef444455", borderRadius: 12, padding: "20px 24px", width: 300, fontFamily: "monospace", display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontSize: 14, color: "#dde4f0", fontWeight: 700 }}>「{deleteConfirm.name}」を削除しますか？</div>
+            <button onClick={() => {
+              const next = savedTrees.filter(e => e.id !== deleteConfirm.id);
+              setSavedTrees(next);
+              idbSet('digitree_saved_trees', next).catch(() => {});
+              setDeleteConfirm(null);
+            }} style={{ padding: "10px 0", borderRadius: 6, cursor: "pointer", background: "#ef444418", border: "1px solid #ef4444", color: "#ef4444", fontSize: 13, fontWeight: 700 }}>削除する</button>
+            <button onClick={() => setDeleteConfirm(null)} style={{ padding: "8px 0", borderRadius: 6, cursor: "pointer", background: "none", border: "1px solid #2a3a52", color: "#7a90a8", fontSize: 12 }}>キャンセル</button>
+          </div>
+        </div>
+      )}
+
       {resetConfirm && (
         <div style={{
           position: "fixed", inset: 0, background: "#000b", zIndex: 300,
