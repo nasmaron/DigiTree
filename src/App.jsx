@@ -761,31 +761,17 @@ const generateLabel = (node, parentNode) => {
 // iOS Safari対応のエクスポート
 const exportJSON = (data, filename) => {
   const json = JSON.stringify(data, null, 2);
-  // iOS判定
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-  if (isIOS) {
-    // iOSはblobダウンロードが効かないのでクリップボードにコピー
-    try {
-      navigator.clipboard.writeText(json).then(() => {
-        alert('JSONをクリップボードにコピーしました。メモ帳などに貼り付けて保存してください。');
-      }).catch(() => {
-        // clipboard APIが使えない場合はデータURLで開く
-        const url = 'data:application/json;charset=utf-8,' + encodeURIComponent(json);
-        window.open(url, '_blank');
-      });
-    } catch {
-      const url = 'data:application/json;charset=utf-8,' + encodeURIComponent(json);
-      window.open(url, '_blank');
-    }
-  } else {
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }
+  }, 100);
 };
 
 const getPhaseLabel = (t, v) => t["ph_" + v] || v;
@@ -1387,7 +1373,7 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
               }
               onChange(z);
               setStackModal(null);
-              setMoveTarget(null);
+              setMoveTarget({ mode: "move", fromKey: null, card: null });
             }} style={{
               padding: "12px 0", borderRadius: 6, cursor: "pointer",
               background: "#4a9eff18", border: "1px solid #4a9eff66", color: "#4a9eff",
@@ -1410,7 +1396,7 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
               }
               onChange(z);
               setStackModal(null);
-              setMoveTarget(null);
+              setMoveTarget({ mode: "move", fromKey: null, card: null });
             }} style={{
               padding: "12px 0", borderRadius: 6, cursor: "pointer",
               background: "#a855f718", border: "1px solid #a855f766", color: "#a855f7",
@@ -1772,10 +1758,11 @@ function NodeDetailPanel({ node, parentNode, onUpdate, onClose, onDelete, onAddC
       {/* 操作モードボタン（盤面タブ時のみ固定表示） */}
       {panelTab === 'board' && (
         <div style={{
-          padding: "6px 14px", borderBottom: "1px solid #1a2535",
-          display: "flex", justifyContent: "flex-end", flexShrink: 0,
+          padding: "6px 14px 0", flexShrink: 0,
           background: "#080e1a",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
         }}>
+          <span style={{ fontSize: 10, color: "#4a9eff", letterSpacing: 2, textTransform: "uppercase", fontWeight: 700, fontFamily: "monospace" }}>{t.zone_info || "盤面情報"}</span>
           <button onClick={() => setMoveTarget(moveTarget ? null : { mode: "move", fromKey: null, card: null })} style={{
             background: moveTarget ? "#f59e0b22" : "none",
             border: `1px solid ${moveTarget ? "#f59e0b" : "#2a3a52"}`,
@@ -1901,8 +1888,7 @@ function NodeDetailPanel({ node, parentNode, onUpdate, onClose, onDelete, onAddC
         {/* 盤面タブ（続き） */}
         {panelTab === 'board' && <>
 
-        <Sec title={t.zone_info}>
-          <ZoneEditor
+        <ZoneEditor
             zones={node.meta.zones || {}}
             onChange={z => update("meta.zones", z)}
             hiddenZones={node.meta.hiddenZones || []}
@@ -1935,7 +1921,6 @@ function NodeDetailPanel({ node, parentNode, onUpdate, onClose, onDelete, onAddC
               onUpdate(next);
             }) : undefined}
           />
-        </Sec>
 
 
         </>
@@ -2066,41 +2051,34 @@ export default function DigiTree() {
   const [settingsTab, setSettingsTab] = useState('display');
 
   // グローバル設定
-  const [settings, setSettings] = useState(() => {
-    try {
-      const s = localStorage.getItem('digitree_settings');
-      return s ? JSON.parse(s) : {
-        defaultNodeColor: null,
-        defaultMemory: 1,
-        defaultMySecurity: 5,
-        defaultOppSecurity: 5,
-        defaultMyHand: 0,
-        showZonesGlobal: true,
-        visibleZoneKeys: ["hand","breeding","main","trash","deck","security"],
-        visibleResourceKeys: ["mySecurity","oppSecurity","myHand"],
-        resourceSize: "normal",
-        defaultMyDeck: 40,
-        defaultOppDeck: 40,
-        defaultMyTrash: 0,
-        defaultOppTrash: 0,
-        zoneTagWrap: "wrap",
-        visibleInputKeys: ["hand","breeding","main","trash","deck","security"],
-      };
-    } catch { return {
-      defaultNodeColor: null,
-      defaultMemory: 1,
-      defaultMySecurity: 5,
-      defaultOppSecurity: 5,
-      defaultMyHand: 0,
-      showZonesGlobal: true,
-      visibleZoneKeys: ["hand","breeding","main","trash","deck","security"],
-      visibleResourceKeys: ["mySecurity","oppSecurity","myHand","myDeck","oppDeck","myTrash"],
-    }; }
-  });
+  const DEFAULT_SETTINGS = {
+    defaultNodeColor: null,
+    defaultMemory: 1,
+    defaultMySecurity: 5,
+    defaultOppSecurity: 5,
+    defaultMyHand: 0,
+    showZonesGlobal: true,
+    visibleZoneKeys: ["hand","breeding","main","trash","deck","security"],
+    visibleResourceKeys: ["mySecurity","oppSecurity","myHand"],
+    resourceSize: "normal",
+    defaultMyDeck: 40,
+    defaultOppDeck: 40,
+    defaultMyTrash: 0,
+    defaultOppTrash: 0,
+    zoneTagWrap: "wrap",
+    visibleInputKeys: ["hand","breeding","main","trash","deck","security"],
+  };
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  useEffect(() => {
+    idbGet('digitree_settings').then(s => {
+      if (s) setSettings(prev => ({ ...prev, ...s }));
+    }).catch(() => {});
+  }, []);
+
   const updateSettings = (patch) => {
     setSettings(prev => {
       const next = { ...prev, ...patch };
-      localStorage.setItem('digitree_settings', JSON.stringify(next));
+      idbSet('digitree_settings', next).catch(() => {});
       return next;
     });
   };
@@ -2113,7 +2091,7 @@ export default function DigiTree() {
       if (Array.isArray(saved) && saved.length > 0) {
         setSavedTrees(saved);
         // IDBから読めたらlocalStorageにもバックアップ
-        try { localStorage.setItem('digitree_saved_trees_bak', JSON.stringify(saved)); } catch {}
+        idbSet('digitree_saved_trees_bak', saved).catch(() => {});
       } else {
         // IDBにない場合はlocalStorageのバックアップを使う
         try {
@@ -2130,8 +2108,7 @@ export default function DigiTree() {
       }
     }).catch(() => {
       try {
-        const bak = localStorage.getItem('digitree_saved_trees_bak');
-        if (bak) { const parsed = JSON.parse(bak); if (Array.isArray(parsed)) setSavedTrees(parsed); }
+        idbGet('digitree_saved_trees_bak').then(bak => { if (bak && Array.isArray(bak)) setSavedTrees(bak); }).catch(() => {});
       } catch {}
     });
   }, []);
@@ -2141,7 +2118,7 @@ export default function DigiTree() {
     idbGet('digitree_tree').then(saved => {
       if (saved && saved.nodes && saved.rootNodeId) {
         setTree(saved);
-        try { localStorage.setItem('digitree_tree_bak', JSON.stringify(saved)); } catch {}
+        idbSet('digitree_tree_bak', saved).catch(() => {});
       } else {
         // IDB→localStorageバックアップ→通常localStorageの順で試みる
         const sources = ['digitree_tree_bak', 'digitree_tree'];
@@ -2211,12 +2188,12 @@ export default function DigiTree() {
     });
   }, [setTreeWithHistory]);
 
-  const [viewport, setViewport] = useState(() => {
-    try {
-      const saved = localStorage.getItem('digitree_viewport');
-      return saved ? JSON.parse(saved) : { x: 0, y: 0, zoom: 1 };
-    } catch { return { x: 0, y: 0, zoom: 1 }; }
-  });
+  const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
+  useEffect(() => {
+    idbGet('digitree_viewport').then(v => { if (v) setViewport(v); }).catch(() => {
+      try { const ls = localStorage.getItem('digitree_viewport'); if (ls) setViewport(JSON.parse(ls)); } catch {}
+    });
+  }, []);
   const [panelOpen, setPanelOpen] = useState(false);
   const [draggingId, setDraggingId] = useState(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
@@ -2226,21 +2203,27 @@ export default function DigiTree() {
   const [isMobile, setIsMobile] = useState(false);
   const pinchRef = useRef(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
-  const [lang, setLang] = useState(() => localStorage.getItem('digitree_lang') || 'ja');
+  const [lang, setLang] = useState('ja');
   const t = TRANSLATIONS[lang] || TRANSLATIONS.ja;
   const [turnIncrement, setTurnIncrement] = useState(1);
-  const changeLang = (l) => { setLang(l); localStorage.setItem('digitree_lang', l); };
+  const changeLang = (l) => { setLang(l); idbSet('digitree_lang', l).catch(() => {}); };
+  useEffect(() => {
+    idbGet('digitree_lang').then(l => { if (l) setLang(l); }).catch(() => {
+      const ls = localStorage.getItem('digitree_lang');
+      if (ls) setLang(ls);
+    });
+  }, []);
 
   // 自動保存
   useEffect(() => {
     if (!dbLoaded) return;
     const data = tree;
     idbSet('digitree_tree', data).catch(() => {});
-    try { localStorage.setItem('digitree_tree_bak', JSON.stringify(data)); } catch {}
+    idbSet('digitree_tree_bak', data).catch(() => {});
   }, [tree, dbLoaded]);
 
   useEffect(() => {
-    try { localStorage.setItem('digitree_viewport', JSON.stringify(viewport)); } catch {}
+    idbSet('digitree_viewport', viewport).catch(() => {});
   }, [viewport]);
 
   useEffect(() => {
@@ -3214,9 +3197,12 @@ export default function DigiTree() {
                             }}>{t.export_all || "📤 Export All"}</button>
                             <button onClick={() => {
                               const input = document.createElement("input");
-                              input.type = "file"; input.accept = ".json";
+                              input.type = "file"; input.accept = ".json,application/json";
+                              document.body.appendChild(input);
                               input.onchange = e => {
-                                const file = e.target.files[0]; if (!file) return;
+                                const file = e.target.files[0];
+                                document.body.removeChild(input);
+                                if (!file) return;
                                 const reader = new FileReader();
                                 reader.onload = ev => {
                                   try {
@@ -3225,9 +3211,13 @@ export default function DigiTree() {
                                       historyRef.current = [...historyRef.current.slice(-29), tree];
                                       setTree(parsed.tree); setSavedTrees(parsed.savedTrees);
                                       idbSet("digitree_saved_trees", parsed.savedTrees).catch(() => {});
+                                      idbSet("digitree_tree", parsed.tree).catch(() => {});
+                                      setSettingsOpen(false);
                                     } else if (parsed.nodes && parsed.rootNodeId) {
                                       historyRef.current = [...historyRef.current.slice(-29), tree];
                                       setTree(parsed);
+                                      idbSet("digitree_tree", parsed).catch(() => {});
+                                      setSettingsOpen(false);
                                     } else { alert("有効なDigiTreeファイルではありません"); }
                                   } catch { alert("読み込みに失敗しました"); }
                                 };
@@ -3458,7 +3448,7 @@ export default function DigiTree() {
                 const next = [entry, ...savedTrees].slice(0, 20);
                 setSavedTrees(next);
                 idbSet('digitree_saved_trees', next).catch(() => {});
-      try { localStorage.setItem('digitree_saved_trees_bak', JSON.stringify(next)); } catch {}
+      idbSet('digitree_saved_trees_bak', next).catch(() => {});
                 setSaveModal(false);
               }} style={{
                 padding: "6px 14px", borderRadius: 5, cursor: "pointer",
@@ -3546,8 +3536,8 @@ export default function DigiTree() {
               <button onClick={() => {
                 idbDel('digitree_tree').catch(() => {});
                 idbDel('digitree_viewport').catch(() => {});
-                localStorage.removeItem('digitree_tree');
-                localStorage.removeItem('digitree_viewport');
+                idbDel('digitree_tree').catch(() => {});
+                idbDel('digitree_viewport').catch(() => {});
                 setTree(INITIAL_TREE);
                 setViewport({ x: 0, y: 0, zoom: 1 });
                 setSelectedId(null);
