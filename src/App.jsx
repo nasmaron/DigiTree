@@ -1363,6 +1363,21 @@ const topCard = (stack) => Array.isArray(stack) ? stack[0] : stack;
 const stackSize = (stack) => Array.isArray(stack) ? stack.length : 1;
 
 function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, parentZones, onPropagateUp, t = {}, settings = {}, moveTarget, setMoveTarget, deleteMode = false, selectedCards = [], setSelectedCards = () => {}, restMode = false, cardStates = {}, onToggleCardState = () => {}, onEvolution, onDragStateChange }) {
+
+  // 常に正規化（全ゾーンを配列の配列に統一）
+  const normalizeZones = (z) => {
+    if (!z) return {};
+    const result = {};
+    for (const key of ZONE_KEYS) {
+      result[key] = (z[key] || []).map(s => Array.isArray(s) ? s : [s]);
+    }
+    return result;
+  };
+  const zones_n = normalizeZones(zones);
+  const parentZones_n = normalizeZones(parentZones);
+
+  // onChangeを正規化してラップ
+  const onChangeNorm = (z) => onChange(normalizeZones(z));
   const [inputs, setInputs] = useState({});
   const [editing, setEditing] = useState({});
   const [diffPreview, setDiffPreview] = useState({});
@@ -1454,17 +1469,17 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
       setDropTarget(null);
 
       if (!target) return;
-      const snap = JSON.parse(JSON.stringify(zones));
+      const snap = JSON.parse(JSON.stringify(zones_n));
 
       if (target.type === 'card' && target.card !== card) {
-        setStackModal({ card, fromKey, targetCard: target.card, targetKey: target.key, zonesSnapshot: JSON.parse(JSON.stringify(zones)) });
+        setStackModal({ card, fromKey, targetCard: target.card, targetKey: target.key, zonesSnapshot: JSON.parse(JSON.stringify(zones_n)) });
       } else if (target.type === 'zone' && target.key !== fromKey) {
         snap[fromKey] = (snap[fromKey] || []).map(s => Array.isArray(s) ? s : [s])
           .map(st => st.filter(c => c !== card)).filter(st => st.length > 0)
           .map(st => st.length === 1 ? st[0] : st);
         if (!snap[target.key]) snap[target.key] = [];
         snap[target.key] = [...snap[target.key], [card]];
-        onChange(snap);
+        onChangeNorm(snap);
       }
     };
     window.addEventListener('pointermove', onMove, { passive: false });
@@ -1491,17 +1506,17 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
     }
 
     // 単体カードとして追加（スタック配列として保存）
-    onChange({ ...zones, [key]: [...current, [addVal]] });
+    onChangeNorm({ ...zones_n, [key]: [...current, [addVal]] });
     if (forcedVal === undefined) setInputs(p => ({ ...p, [key]: "" }));
   };
 
   const removeCard = (key, card) => {
-    const newZones = JSON.parse(JSON.stringify(zones));
+    const newZones = JSON.parse(JSON.stringify(zones_n));
     newZones[key] = (newZones[key] || []).map(s => Array.isArray(s) ? s : [s])
       .map(stack => stack.filter(c => c !== card))
       .filter(stack => stack.length > 0)
       .map(stack => stack.length === 1 ? stack[0] : stack);
-    onChange(newZones);
+    onChangeNorm(newZones);
     setEditing(p => { const n = { ...p }; delete n[`${key}:${card}`]; return n; });
   };
 
@@ -1512,13 +1527,13 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
   const commitEdit = (key, card) => {
     const newVal = (editing[`${key}:${card}`] || "").trim();
     if (!newVal) { removeCard(key, card); return; }
-    const newZones = JSON.parse(JSON.stringify(zones));
+    const newZones = JSON.parse(JSON.stringify(zones_n));
     newZones[key] = (newZones[key] || []).map(s => {
       const stack = Array.isArray(s) ? s : [s];
       const updated = stack.map(c => c === card ? newVal : c);
       return updated.length === 1 ? updated[0] : updated;
     });
-    onChange(newZones);
+    onChangeNorm(newZones);
     setEditing(p => { const n = { ...p }; delete n[`${key}:${card}`]; return n; });
   };
 
@@ -1552,7 +1567,7 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
         <div style={{
           position: "fixed", inset: 0, background: "#000b", zIndex: 300,
           display: "flex", alignItems: "flex-end", justifyContent: "center",
-        }} onClick={() => { if (stackModal?.zonesSnapshot) onChange(stackModal.zonesSnapshot); setStackModal(null); setMoveTarget({ mode: "move", fromKey: null, card: null }); }}
+        }} onClick={() => { setStackModal(null); setMoveTarget({ mode: "move", fromKey: null, card: null }); }}
            onPointerDown={e => e.stopPropagation()}>
           <div onClick={e => e.stopPropagation()} style={{
             background: "#0f1a28", border: "1px solid #4a9eff55",
@@ -1570,35 +1585,41 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
             {/* 上に重ねる（進化） */}
             <button onClick={() => {
               const { card, fromKey, targetCard, targetKey } = stackModal;
-              console.log('[進化] card:', card, 'from:', fromKey, 'targetCard:', targetCard, 'to:', targetKey);
-              console.log('[進化] zones[fromKey]:', JSON.stringify(zones[fromKey]));
-              console.log('[進化] zones[targetKey]:', JSON.stringify(zones[targetKey]));
-              const z = JSON.parse(JSON.stringify(zones));
+              const z = JSON.parse(JSON.stringify(zones_n));
+              alert(`card:${card} from:${fromKey} target:${targetCard} to:${targetKey} same:${fromKey===targetKey}\nz[from]:${JSON.stringify(z[fromKey])}\nz[to]:${JSON.stringify(z[targetKey])}`);
 
-              // Step1: fromKeyからcardを1枚除去
-              z[fromKey] = (z[fromKey] || []).map(s => Array.isArray(s) ? s : [s])
-                .map(stack => {
-                  const idx = stack.indexOf(card);
-                  if (idx === -1) return stack;
-                  const next = [...stack];
-                  next.splice(idx, 1);
-                  return next;
-                })
-                .filter(stack => stack.length > 0)
-                .map(stack => stack.length === 1 ? stack[0] : stack);
+              if (fromKey === targetKey) {
+                let cardRemoved = false;
+                z[fromKey] = (z[fromKey] || []).map(s => Array.isArray(s) ? s : [s])
+                  .reduce((acc, stack) => {
+                    if (stack.some(c => c.trim() === targetCard.trim())) {
+                      acc.push([card, ...stack]);
+                    } else if (!cardRemoved && stack.length === 1 && stack[0].trim() === card.trim()) {
+                      cardRemoved = true;
+                    } else if (stack.some(c => c.trim() === card.trim())) {
+                      const next = stack.filter(c => c.trim() !== card.trim());
+                      if (next.length > 0) acc.push(next);
+                      if (!cardRemoved) cardRemoved = true;
+                    } else {
+                      acc.push(stack);
+                    }
+                    return acc;
+                  }, [])
+                  .map(stack => stack.length === 1 ? stack[0] : stack);
+              } else {
+                z[fromKey] = (z[fromKey] || []).map(s => Array.isArray(s) ? s : [s])
+                  .map(stack => stack.filter(c => c.trim() !== card.trim()))
+                  .filter(stack => stack.length > 0)
+                  .map(stack => stack.length === 1 ? stack[0] : stack);
+                z[targetKey] = (z[targetKey] || []).map(s => {
+                  const stack = Array.isArray(s) ? s : [s];
+                  if (stack.some(c => c.trim() === targetCard.trim())) return [card, ...stack];
+                  return stack.length === 1 ? stack[0] : stack;
+                });
+              }
 
-              console.log('[進化] Step1後 z[fromKey]:', JSON.stringify(z[fromKey]));
-
-              // Step2: targetKeyのtargetCardを含むスタックの先頭にcardを追加
-              z[targetKey] = (z[targetKey] || []).map(s => {
-                const stack = Array.isArray(s) ? s : [s];
-                console.log('[進化] スタック確認:', JSON.stringify(stack), 'includes?', stack.includes(targetCard));
-                if (stack.includes(targetCard)) return [card, ...stack];
-                return stack.length === 1 ? stack[0] : stack;
-              });
-
-              console.log('[進化] Step2後 z[targetKey]:', JSON.stringify(z[targetKey]));
-              onChange(z);
+              alert(`結果 z[to]:${JSON.stringify(z[targetKey])}`);
+              onChangeNorm(z);
               onEvolution && onEvolution();
               setStackModal(null);
               setMoveTarget({ mode: "move", fromKey: null, card: null });
@@ -1610,28 +1631,39 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
             {/* 下に潜り込む */}
             <button onClick={() => {
               const { card, fromKey, targetCard, targetKey } = stackModal;
-              const z = JSON.parse(JSON.stringify(zones));
+              const z = JSON.parse(JSON.stringify(zones_n));
 
-              // Step1: fromKeyからcardを1枚除去
-              z[fromKey] = (z[fromKey] || []).map(s => Array.isArray(s) ? s : [s])
-                .map(stack => {
-                  const idx = stack.indexOf(card);
-                  if (idx === -1) return stack;
-                  const next = [...stack];
-                  next.splice(idx, 1);
-                  return next;
-                })
-                .filter(stack => stack.length > 0)
-                .map(stack => stack.length === 1 ? stack[0] : stack);
+              if (fromKey === targetKey) {
+                let cardRemoved = false;
+                z[fromKey] = (z[fromKey] || []).map(s => Array.isArray(s) ? s : [s])
+                  .reduce((acc, stack) => {
+                    if (stack.some(c => c.trim() === targetCard.trim())) {
+                      acc.push([...stack, card]);
+                    } else if (!cardRemoved && stack.length === 1 && stack[0].trim() === card.trim()) {
+                      cardRemoved = true;
+                    } else if (stack.some(c => c.trim() === card.trim())) {
+                      const next = stack.filter(c => c.trim() !== card.trim());
+                      if (next.length > 0) acc.push(next);
+                      if (!cardRemoved) cardRemoved = true;
+                    } else {
+                      acc.push(stack);
+                    }
+                    return acc;
+                  }, [])
+                  .map(stack => stack.length === 1 ? stack[0] : stack);
+              } else {
+                z[fromKey] = (z[fromKey] || []).map(s => Array.isArray(s) ? s : [s])
+                  .map(stack => stack.filter(c => c.trim() !== card.trim()))
+                  .filter(stack => stack.length > 0)
+                  .map(stack => stack.length === 1 ? stack[0] : stack);
+                z[targetKey] = (z[targetKey] || []).map(s => {
+                  const stack = Array.isArray(s) ? s : [s];
+                  if (stack.some(c => c.trim() === targetCard.trim())) return [...stack, card];
+                  return stack.length === 1 ? stack[0] : stack;
+                });
+              }
 
-              // Step2: targetKeyのtargetCardを含むスタックの末尾にcardを追加
-              z[targetKey] = (z[targetKey] || []).map(s => {
-                const stack = Array.isArray(s) ? s : [s];
-                if (stack.includes(targetCard)) return [...stack, card];
-                return stack.length === 1 ? stack[0] : stack;
-              });
-
-              onChange(z);
+              onChangeNorm(z);
               setStackModal(null);
               setMoveTarget({ mode: "move", fromKey: null, card: null });
             }} style={{
@@ -1641,14 +1673,14 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
             }}>「{stackModal.targetCard}」の下に入る（進化元）</button>
             <button onClick={() => {
               const { card, fromKey, targetKey } = stackModal;
-              const z = JSON.parse(JSON.stringify(zones));
+              const z = JSON.parse(JSON.stringify(zones_n));
               z[fromKey] = (z[fromKey] || []).map(s => Array.isArray(s) ? s : [s])
                 .map(stack => stack.filter(c => c !== card))
                 .filter(stack => stack.length > 0)
                 .map(stack => stack.length === 1 ? stack[0] : stack);
               if (!z[targetKey]) z[targetKey] = [];
               z[targetKey] = [...z[targetKey], [card]];
-              onChange(z);
+              onChangeNorm(z);
               setStackModal(null);
               setMoveTarget({ mode: "move", fromKey: null, card: null });
             }} style={{
@@ -1748,7 +1780,7 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
       {showOnNode && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, minWidth: 0, width: "100%" }}>
           {zoneDefs.map(({ key, label, color }) => {
-            const stacks = (zones[key] || []).map(s => Array.isArray(s) ? s : [s]);
+            const stacks = zones_n[key] || [];
             const isHidden = hiddenZones.includes(key);
             const isDropTarget = moveTarget?.card && moveTarget.fromKey !== key;
             return (
@@ -1772,7 +1804,7 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
                 }} onClick={() => {
                   if (stackModal) return;
                   if (moveTarget?.card && moveTarget.fromKey !== key) {
-                    const newZones = JSON.parse(JSON.stringify(zones));
+                    const newZones = JSON.parse(JSON.stringify(zones_n));
                     // 元ゾーンから該当カードを1枚だけ除去（スタックは維持）
                     newZones[moveTarget.fromKey] = (newZones[moveTarget.fromKey] || []).map(s =>
                       Array.isArray(s) ? s : [s]
@@ -1783,7 +1815,7 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
                     // 新ゾーンに単体追加（配列形式）
                     if (!newZones[key]) newZones[key] = [];
                     newZones[key] = [...newZones[key], [moveTarget.card]];
-                    onChange(newZones);
+                    onChangeNorm(newZones);
                     setMoveTarget({ mode: "move", fromKey: null, card: null });
                   }
                 }}>
@@ -1796,7 +1828,7 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                       {stacks.map((stack, stackIdx) => {
-                        const parentStacks = (parentZones?.[key] || []).map(s => Array.isArray(s) ? s : [s]);
+                        const parentStacks = parentZones_n[key] || [];
                         const parentTopCards = parentStacks.map(s => s[0]);
                         const isStackNew = !parentTopCards.includes(stack[0]);
                         const expandKey = `${key}:${stackIdx}`;
@@ -1842,7 +1874,7 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
                                       } else if (moveTarget.card === card && moveTarget.fromKey === key) {
                                         setMoveTarget({ mode: "move", fromKey: null, card: null });
                                       } else {
-                                        setStackModal({ card: moveTarget.card, fromKey: moveTarget.fromKey, targetCard: card, targetKey: key, zonesSnapshot: JSON.parse(JSON.stringify(zones)) });
+                                        setStackModal({ card: moveTarget.card, fromKey: moveTarget.fromKey, targetCard: card, targetKey: key, zonesSnapshot: JSON.parse(JSON.stringify(zones_n)) });
                                       }
                                     }
                                   }} style={{
@@ -1902,7 +1934,7 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
                                   } else if (moveTarget.card === stack[0] && moveTarget.fromKey === key) {
                                     setMoveTarget({ mode: "move", fromKey: null, card: null });
                                   } else {
-                                    setStackModal({ card: moveTarget.card, fromKey: moveTarget.fromKey, targetCard: stack[0], targetKey: key, zonesSnapshot: JSON.parse(JSON.stringify(zones)) });
+                                    setStackModal({ card: moveTarget.card, fromKey: moveTarget.fromKey, targetCard: stack[0], targetKey: key, zonesSnapshot: JSON.parse(JSON.stringify(zones_n)) });
                                   }
                                 }
                               }} style={{
@@ -1955,11 +1987,11 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
         <button
           onClick={() => {
             if (selectedCards.length === 0) return;
-            const newZones = JSON.parse(JSON.stringify(zones));
+            const newZones = JSON.parse(JSON.stringify(zones_n));
             selectedCards.forEach(({ key, card }) => {
               newZones[key] = (newZones[key] || []).filter(c => c !== card);
             });
-            onChange(newZones);
+            onChangeNorm(newZones);
             setSelectedCards([]);
           }}
           style={{
