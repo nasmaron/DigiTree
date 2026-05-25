@@ -789,7 +789,7 @@ const makeNode = (parentId, turn, offsetY, action = {}) => ({
   children: [],
   state: {
     turn,
-    phase: "main",
+    phase: "my",
     memory: 1,
     myHand: 0,
     oppHand: 0,
@@ -970,7 +970,7 @@ function BoardNodeCard({ node, parentNode, isSelected, onSelect, onAddChild, onD
     fn();
   };
 
-  const phase = PHASES.includes(node.state?.phase) ? node.state.phase : "main";
+  const phase = node.state.phase || "main";
   const phaseLabel = getPhaseLabel(t, phase);
 
   return (
@@ -1758,7 +1758,7 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
     return cur - par;
   };
 
-  const phaseKey = PHASES.includes(state?.phase) ? state.phase : "main";
+  const phaseKey = state.phase || "main";
   const phaseName = t["ph_" + phaseKey] || phaseKey;
 
   return (
@@ -2517,7 +2517,7 @@ function NodeDetailPanel({ node, parentNode, onUpdate, onClose, onDelete, onAddC
 
         <Sec title={t.phase_label || "フェイズ"}>
           <select
-            value={PHASES.includes(node.state?.phase) ? node.state.phase : "main"}
+            value={node.state.phase || "main"}
             onChange={e => update("state.phase", e.target.value)}
             style={{
               width: "100%", background: "#0b1320", border: "1px solid #4a9eff44",
@@ -3228,7 +3228,7 @@ export default function DigiTree() {
       const nd = nodes[id];
       const parent = idx > 0 ? nodes[route[idx - 1]] : null;
       const mem = nd.state.memory ?? 0;
-      const phase = phaseLabels[PHASES.includes(nd.state?.phase) ? nd.state.phase : "main"] || "メインフェイズ";
+      const phase = phaseLabels[nd.state.phase || "main"] || "メインフェイズ";
       const isWin = (nd.state.oppSecurity ?? 0) < 0;
       const label = nd.meta.label === "INITIAL_BOARD_PLACEHOLDER" ? "開始盤面" : nd.meta.label;
       const cs = nd.meta.cardStates || {};
