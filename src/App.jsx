@@ -3264,7 +3264,8 @@ export default function DigiTree() {
         ? `<div style="background:#090f1e;border:1px solid #1a2535;border-radius:4px;padding:3px 5px;min-height:22px"></div>`
         : [...secCards].reverse().map(card => {
             const isNew = !(parent?.meta?.zones?.security||[]).includes(card);
-            return `<div style="background:${isNew?"#ef444430":"#ef444415"};border:1px solid ${isNew?"#ef4444":"#ef444455"};border-radius:4px;padding:3px 5px;font-size:9px;color:#ef4444;font-weight:${isNew?700:400};margin-bottom:3px">${chip(card,"security").replace(/.*>(.*)<\/span>/,"$1")} ${card}${isNew?" ★":""}</div>`;
+            const isRest = cs[`security:${card}`] === "rest";
+            return `<div style="background:${isNew?"#ef444430":"#ef444415"};border:1px solid ${isNew?"#ef4444":"#ef444455"};border-radius:4px;padding:3px 5px;font-size:9px;color:#ef4444;font-weight:${isNew?700:400};margin-bottom:3px">${isRest?"▶︎":"▲"} ${card}${isNew?" ★":""}</div>`;
           }).join("");
 
       const connector = idx < route.length - 1 ? `<div style="text-align:center;color:#243040;font-size:20px;margin:4px 0">↓</div>` : "";
