@@ -3250,13 +3250,13 @@ export default function DigiTree() {
         return `<div style="background:#090f1e;border:1px solid ${color}66;border-radius:6px;padding:6px 8px;display:flex;flex-direction:column;gap:4px;${style}"><div style="font-size:9px;color:${color};font-weight:700;letter-spacing:1px">${label}</div><div style="display:flex;flex-wrap:wrap">${inner}</div></div>`;
       };
 
-      // メモリーゲージ
+      // メモリーゲージ（flexで収まるサイズ）
       const MAX_MEM = 10;
       const memCircle = (n, active, color) =>
-        `<div style="width:20px;height:20px;border-radius:50%;background:${active?color:"#0b1320"};border:1px solid ${active?color:"#1a2535"};display:flex;align-items:center;justify-content:center;font-size:8px;color:${active?"#000":"#2a3a52"};font-weight:700">${n}</div>`;
+        `<div style="flex:1;min-width:0;aspect-ratio:1/1;max-width:22px;border-radius:50%;background:${active?color:"#0b1320"};border:1px solid ${active?color:"#1a2535"};display:flex;align-items:center;justify-content:center;font-size:8px;color:${active?"#000":"#2a3a52"};font-weight:700">${n}</div>`;
       const leftCircles = Array.from({length:MAX_MEM},(_,i)=>MAX_MEM-i).map(n=>memCircle(n,mem>=n,"#4a9eff")).join("");
       const rightCircles = Array.from({length:MAX_MEM},(_,i)=>i+1).map(n=>memCircle(n,mem<=-n,"#ef4444")).join("");
-      const centerCircle = `<div style="width:24px;height:24px;border-radius:50%;background:${mem===0?"#94a3b8":"#0b1320"};border:2px solid ${mem===0?"#94a3b8":"#2a3a52"};display:flex;align-items:center;justify-content:center;font-size:9px;color:${mem===0?"#000":"#2a3a52"};font-weight:900;flex-shrink:0">0</div>`;
+      const centerCircle = `<div style="width:22px;height:22px;border-radius:50%;background:${mem===0?"#94a3b8":"#0b1320"};border:2px solid ${mem===0?"#94a3b8":"#2a3a52"};display:flex;align-items:center;justify-content:center;font-size:9px;color:${mem===0?"#000":"#2a3a52"};font-weight:900;flex-shrink:0">0</div>`;
 
       // SEC縦積み
       const secCards = nd.meta.zones?.security || [];
@@ -3282,10 +3282,10 @@ export default function DigiTree() {
   <!-- メモリーゲージ -->
   <div style="background:#090f1e;border:1px solid #1a2535;border-radius:6px;padding:6px 10px;margin-bottom:6px">
     <div style="font-size:9px;color:#4a9eff;font-weight:700;margin-bottom:4px">MEMORY</div>
-    <div style="display:flex;align-items:center;gap:1px">
-      <div style="display:flex;gap:1px;flex:1;justify-content:flex-end">${leftCircles}</div>
+    <div style="display:flex;align-items:center;gap:1px;overflow:hidden">
+      <div style="display:flex;gap:1px;flex:1;min-width:0;justify-content:flex-end">${leftCircles}</div>
       ${centerCircle}
-      <div style="display:flex;gap:1px;flex:1">${rightCircles}</div>
+      <div style="display:flex;gap:1px;flex:1;min-width:0">${rightCircles}</div>
     </div>
   </div>
 
