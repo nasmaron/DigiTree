@@ -3222,10 +3222,9 @@ export default function DigiTree() {
 
   const generateHTML = useCallback((route) => {
     const phaseLabels = { turn_start:"ターン開始時", active:"アクティブフェイズ", draw:"ドローフェイズ", breeding:"育成フェイズ", main:"メインフェイズ", turn_end:"ターン終了時" };
-    const zoneLabels = { hand:"手札", breeding:"育成エリア", main:"バトルエリア", trash:"トラッシュ", deck:"山札", security:"セキュリティ" };
     const zoneColors = { hand:"#22c55e", breeding:"#4a9eff", main:"#f59e0b", trash:"#94a3b8", deck:"#a855f7", security:"#ef4444" };
 
-    const cardsHTML = route.map((id, idx) => {
+    const nodeHTML = route.map((id, idx) => {
       const nd = nodes[id];
       const parent = idx > 0 ? nodes[route[idx - 1]] : null;
       const mem = nd.state.memory ?? 0;
@@ -3233,40 +3232,95 @@ export default function DigiTree() {
       const isWin = (nd.state.oppSecurity ?? 0) < 0;
       const label = nd.meta.label === "INITIAL_BOARD_PLACEHOLDER" ? "開始盤面" : nd.meta.label;
       const cs = nd.meta.cardStates || {};
-
-      const zonesH = Object.entries(zoneLabels).map(([key, zlabel]) => {
-        const cards = nd.meta.zones?.[key] || [];
-        const color = zoneColors[key];
-        const inner = cards.length === 0
-          ? `<span style="color:#555;font-style:italic">なし</span>`
-          : cards.map(card => {
-              const isRest = cs[`${key}:${card}`] === "rest";
-              const isNew = !(parent?.meta?.zones?.[key] || []).includes(card);
-              return `<span style="background:${color}22;border:1px solid ${color}66;border-radius:4px;padding:2px 6px;font-size:11px;color:${color};font-weight:${isNew?700:400};margin:2px;display:inline-block">${isRest?"▶︎":"▲"} ${card}${isNew?" ★":""}</span>`;
-            }).join("");
-        return `<div style="margin-bottom:6px"><div style="font-size:10px;color:${color};font-weight:700;margin-bottom:3px">${zlabel}</div><div>${inner}</div></div>`;
-      }).join("");
-
       const memColor = mem > 0 ? "#4a9eff" : mem < 0 ? "#ef4444" : "#94a3b8";
-      const resH = [
-        { label:"自SEC", val:nd.state.mySecurity??0, color:"#4a9eff" },
-        { label:"相SEC", val:nd.state.oppSecurity??0, color:"#ef4444" },
-        { label:"自ドロー", val:nd.state.myHand??0, color:"#22c55e" },
-      ].map(r => `<span style="background:#111;border:1px solid ${r.color}44;border-radius:5px;padding:4px 10px;margin:2px;display:inline-block;text-align:center"><div style="font-size:9px;color:${r.color}">${r.label}</div><div style="font-size:18px;font-weight:900;color:${r.color}">${r.val}</div></span>`).join("");
+
+      // カードチップ
+      const chip = (card, zoneKey) => {
+        const color = zoneColors[zoneKey];
+        const isRest = cs[`${zoneKey}:${card}`] === "rest";
+        const isNew = !(parent?.meta?.zones?.[zoneKey] || []).includes(card);
+        return `<span style="background:${color}${isNew?"40":"18"};border:1px solid ${color}${isNew?"":"55"};border-radius:4px;padding:2px 5px;font-size:10px;color:${color};font-weight:${isNew?700:400};display:inline-flex;align-items:center;gap:3px;margin:2px;line-height:1.4">${isRest?"▶︎":"▲"} ${card}${isNew?" ★":""}</span>`;
+      };
+      const zone = (zoneKey, label, style="") => {
+        const color = zoneColors[zoneKey];
+        const cards = nd.meta.zones?.[zoneKey] || [];
+        const inner = cards.length === 0
+          ? `<span style="font-size:9px;color:#2a3a52;font-style:italic">なし</span>`
+          : cards.map(c => chip(c, zoneKey)).join("");
+        return `<div style="background:#090f1e;border:1px solid ${color}66;border-radius:6px;padding:6px 8px;display:flex;flex-direction:column;gap:4px;${style}"><div style="font-size:9px;color:${color};font-weight:700;letter-spacing:1px">${label}</div><div style="display:flex;flex-wrap:wrap">${inner}</div></div>`;
+      };
+
+      // メモリーゲージ
+      const MAX_MEM = 10;
+      const memCircle = (n, active, color) =>
+        `<div style="width:20px;height:20px;border-radius:50%;background:${active?color:"#0b1320"};border:1px solid ${active?color:"#1a2535"};display:flex;align-items:center;justify-content:center;font-size:8px;color:${active?"#000":"#2a3a52"};font-weight:700">${n}</div>`;
+      const leftCircles = Array.from({length:MAX_MEM},(_,i)=>MAX_MEM-i).map(n=>memCircle(n,mem>=n,"#4a9eff")).join("");
+      const rightCircles = Array.from({length:MAX_MEM},(_,i)=>i+1).map(n=>memCircle(n,mem<=-n,"#ef4444")).join("");
+      const centerCircle = `<div style="width:24px;height:24px;border-radius:50%;background:${mem===0?"#94a3b8":"#0b1320"};border:2px solid ${mem===0?"#94a3b8":"#2a3a52"};display:flex;align-items:center;justify-content:center;font-size:9px;color:${mem===0?"#000":"#2a3a52"};font-weight:900;flex-shrink:0">0</div>`;
+
+      // SEC縦積み
+      const secCards = nd.meta.zones?.security || [];
+      const secHTML = secCards.length === 0
+        ? `<div style="background:#090f1e;border:1px solid #1a2535;border-radius:4px;padding:3px 5px;min-height:22px"></div>`
+        : [...secCards].reverse().map(card => {
+            const isNew = !(parent?.meta?.zones?.security||[]).includes(card);
+            return `<div style="background:${isNew?"#ef444430":"#ef444415"};border:1px solid ${isNew?"#ef4444":"#ef444455"};border-radius:4px;padding:3px 5px;font-size:9px;color:#ef4444;font-weight:${isNew?700:400};margin-bottom:3px">${chip(card,"security").replace(/.*>(.*)<\/span>/,"$1")} ${card}${isNew?" ★":""}</div>`;
+          }).join("");
 
       const connector = idx < route.length - 1 ? `<div style="text-align:center;color:#243040;font-size:20px;margin:4px 0">↓</div>` : "";
 
-      return `<div style="background:#0f172a;border:1px solid #243040;border-radius:10px;padding:12px 14px">
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      return `
+<div style="background:#0f172a;border:1px solid #243040;border-radius:10px;padding:12px;font-family:monospace">
+  <!-- ヘッダー -->
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
     <span style="background:#4a9eff22;color:#4a9eff;border:1px solid #4a9eff55;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700">${idx+1}手目</span>
-    <span style="font-size:10px;color:#94a3b8">${phase}</span>
-    ${isWin ? '<span style="color:#22c55e;font-weight:900;font-size:14px;text-shadow:0 0 10px #22c55e">【勝ち】</span>' : ""}
+    <span style="font-size:11px;color:#4a9eff;font-weight:700">${phase}</span>
+    ${isWin?'<span style="color:#22c55e;font-weight:900;font-size:14px;text-shadow:0 0 10px #22c55e">【勝ち】</span>':""}
   </div>
-  <div style="font-size:16px;font-weight:700;color:#dde4f0;margin-bottom:8px;border-bottom:1px solid #243040;padding-bottom:6px">${label}</div>
-  <div style="margin-bottom:8px"><span style="font-size:10px;color:#4a9eff;font-weight:700">MEMORY</span> <span style="font-size:20px;font-weight:900;color:${memColor}">${mem>0?"+"+mem:mem}</span></div>
-  <div style="margin-bottom:10px">${resH}</div>
-  <div style="margin-bottom:8px">${zonesH}</div>
-  ${nd.meta.note ? `<div style="background:#090f1e;border-left:2px solid #243040;padding:5px 8px;font-size:11px;color:#7a90a8;border-radius:3px">📝 ${nd.meta.note}</div>` : ""}
+  <div style="font-size:15px;font-weight:700;color:#dde4f0;margin-bottom:10px;border-bottom:1px solid #243040;padding-bottom:6px">${label}</div>
+
+  <!-- メモリーゲージ -->
+  <div style="background:#090f1e;border:1px solid #1a2535;border-radius:6px;padding:6px 10px;margin-bottom:6px">
+    <div style="font-size:9px;color:#4a9eff;font-weight:700;margin-bottom:4px">MEMORY</div>
+    <div style="display:flex;align-items:center;gap:1px">
+      <div style="display:flex;gap:1px;flex:1;justify-content:flex-end">${leftCircles}</div>
+      ${centerCircle}
+      <div style="display:flex;gap:1px;flex:1">${rightCircles}</div>
+    </div>
+  </div>
+
+  <!-- 自SEC / 相SEC / 自ドロー -->
+  <div style="display:flex;gap:6px;margin-bottom:6px">
+    ${[{label:"自SEC",key:"mySecurity",color:"#4a9eff"},{label:"相SEC",key:"oppSecurity",color:"#ef4444"},{label:"自ドロー",key:"myHand",color:"#22c55e"}].map(r=>{
+      const val=nd.state[r.key]??0;
+      const d=parent?(val-(parent.state[r.key]??val)):0;
+      return `<div style="flex:1;background:#090f1e;border:1px solid ${r.color}44;border-radius:6px;padding:5px 8px;text-align:center"><div style="font-size:9px;color:${r.color};font-weight:700">${r.label}</div><div style="display:flex;align-items:baseline;justify-content:center;gap:4px"><span style="font-size:20px;font-weight:900;color:${r.color}">${val}</span>${d!==0?`<span style="font-size:11px;font-weight:700;color:${d>0?"#22c55e":"#ef4444"}">${d>0?"+"+d:d}</span>`:""}</div></div>`;
+    }).join("")}
+  </div>
+
+  <!-- Security + Battle area + Deck/Trash -->
+  <div style="display:flex;gap:6px;margin-bottom:6px">
+    <!-- Security縦積み -->
+    <div style="width:80px;flex-shrink:0">
+      <div style="font-size:9px;color:#ef4444;font-weight:700;margin-bottom:3px">Security(${secCards.length})</div>
+      ${secHTML}
+    </div>
+    <!-- Battle area -->
+    ${zone("main","Battle area","flex:1")}
+    <!-- Deck/Trash -->
+    <div style="width:80px;flex-shrink:0;display:flex;flex-direction:column;gap:6px">
+      ${zone("deck","Deck","flex:1")}
+      ${zone("trash","Trash","flex:1")}
+    </div>
+  </div>
+
+  <!-- 育成エリア + 手札 -->
+  <div style="display:flex;gap:6px;margin-bottom:${nd.meta.note?"6px":"0"}">
+    ${zone("breeding","育成エリア / Raising area","width:160px;flex-shrink:0")}
+    ${zone("hand","手札","flex:1")}
+  </div>
+
+  ${nd.meta.note?`<div style="background:#090f1e;border-left:2px solid #243040;padding:5px 8px;font-size:11px;color:#7a90a8;border-radius:3px">📝 ${nd.meta.note}</div>`:""}
 </div>${connector}`;
     }).join("\n");
 
@@ -3279,8 +3333,8 @@ export default function DigiTree() {
 </head>
 <body style="background:#060c18;color:#dde4f0;font-family:monospace;padding:16px;margin:0">
 <h1 style="font-size:18px;color:#4a9eff;text-align:center;margin-bottom:24px">🌳 ${tree.title}</h1>
-<div style="display:flex;flex-direction:column;gap:12px;max-width:480px;margin:0 auto">
-${cardsHTML}
+<div style="max-width:480px;margin:0 auto">
+${nodeHTML}
 </div>
 </body>
 </html>`;
