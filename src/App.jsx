@@ -72,7 +72,7 @@ const TRANSLATIONS = {
     act_move:            "移動",
     act_opponent_action: "相手行動",
     act_end_turn:        "ターン終了",
-    // フェーズ
+    // フェイズ
     ph_turn_start: "ターン開始時",
     ph_active:     "アクティブフェイズ",
     ph_draw:       "ドローフェイズ",
@@ -91,7 +91,7 @@ const TRANSLATIONS = {
     node_name:         "ノード名",
     node_placeholder:  "1手目...",
     move_count:        "手数",
-    phase_label:       "フェーズ",
+    phase_label:       "フェイズ",
     action_section:    "遷移行動",
     action_type:       "行動タイプ",
     action_desc:       "行動説明",
@@ -146,7 +146,7 @@ const TRANSLATIONS = {
     card_input_placeholder: "カード名を入力...",
     zone_hand: "手札",
     zone_breeding: "育成エリア",
-    zone_main: "メインエリア",
+    zone_main: "バトルエリア",
     zone_trash: "トラッシュ",
     zone_deck: "山札",
     zone_security: "セキュリティ",
@@ -264,7 +264,7 @@ const TRANSLATIONS = {
     card_input_placeholder: "Enter card name...",
     zone_hand: "Hand",
     zone_breeding: "Breeding",
-    zone_main: "Main Area",
+    zone_main: "Battle Area",
     zone_trash: "Trash",
     zone_deck: "Deck",
     zone_security: "Security",
@@ -382,7 +382,7 @@ const TRANSLATIONS = {
     card_input_placeholder: "输入卡牌名称...",
     zone_hand: "手牌",
     zone_breeding: "育成区",
-    zone_main: "主战区",
+    zone_main: "战斗区",
     zone_trash: "废弃区",
     zone_deck: "牌库",
     zone_security: "安保区",
@@ -500,7 +500,7 @@ const TRANSLATIONS = {
     card_input_placeholder: "카드 이름 입력...",
     zone_hand: "핸드",
     zone_breeding: "육성 영역",
-    zone_main: "메인 영역",
+    zone_main: "배틀 영역",
     zone_trash: "트래시",
     zone_deck: "덱",
     zone_security: "시큐리티",
@@ -618,7 +618,7 @@ const TRANSLATIONS = {
     card_input_placeholder: "Nombre de carta...",
     zone_hand: "Mano",
     zone_breeding: "Crianza",
-    zone_main: "Área Principal",
+    zone_main: "Área de Batalla",
     zone_trash: "Descarte",
     zone_deck: "Mazo",
     zone_security: "Seguridad",
@@ -673,7 +673,6 @@ const NODE_TAGS = {
   mistake:  { color: "#a855f7", bg: "#1e1030", border: "#a855f7" },
   question: { color: "#94a3b8", bg: "#1a2030", border: "#94a3b8" },
 };
-// ラベルはTRANSLATIONSから引く: t["tag_" + key]
 const getTagLabel = (t, key) => t["tag_" + key] || key;
 
 const ACTION_TYPES = [
@@ -686,14 +685,11 @@ const PHASES = [
   "turn_start","active","draw","breeding","main","turn_end",
 ];
 
-// ノードラベルを現在の言語に変換（「N手目」パターンを検出して変換）
 const getNodeLabel = (label, t) => {
   if (!label) return label;
   if (label === "INITIAL_BOARD_PLACEHOLDER") return t.initial_board || "開始盤面";
-  // 全言語の開始盤面ラベルを検出して変換
   const initialBoards = ["開始盤面", "Opening Board", "开局盘面", "시작 보드", "Tablero Inicial"];
   if (initialBoards.includes(label)) return t.initial_board || "開始盤面";
-  // 「N手目」「Move N」「第N步」「N수」「Jugada N」のパターンを検出
   const patterns = [
     /^(\d+)手目$/,
     /^Move (\d+)$/,
@@ -711,46 +707,49 @@ const getNodeLabel = (label, t) => {
 };
 
 
-// メインエリアの変化からラベルを自動生成
+// ============================================================
+// generateLabel
+// ルール根拠（デジモンカードゲーム総合ルール Ver.4.0）:
+//   - 育成エリア→バトルエリアへの単体移動 = 「移動」(4-16)
+//   - 育成から来たカードがバトルエリアのカードに重なることはない
+//   - 手札のカードをバトルエリアの既存カードに重ねる = 「進化」(8-1)
+//   - 手札の複数カードをまとめてデジクロス条件で登場 = 「デジクロス」(7-2)
+//   - 手札/トラッシュからバトルエリアに単体登場 = 「登場」(7-1)
+// ============================================================
 const generateLabel = (node, parentNode) => {
   if (!parentNode) return null;
 
   const parentMain     = parentNode.meta?.zones?.main     || [];
   const childMain      = node.meta?.zones?.main           || [];
   const parentBreeding = parentNode.meta?.zones?.breeding || [];
-  const parentHand     = parentNode.meta?.zones?.hand     || [];
-  const parentTrash    = parentNode.meta?.zones?.trash    || [];
+
+  // カード名の括弧より前だけ取る（ラベル表示用）
+  const baseName = (name) => name.includes('（') ? name.slice(0, name.indexOf('（')).trim() : name;
 
   const events = [];
 
   for (const card of childMain) {
     if (parentMain.includes(card)) continue; // 変化なし
 
-    // 「B（A）」形式のスタックチェック
-    const stackMatch = card.match(/^(.+)（(.+)）$/);
-    if (stackMatch) {
-      const top   = stackMatch[1].trim();
-      const under = stackMatch[2].trim();
-      // 手札またはトラッシュからメインのカードに重ねた = 進化
-      const fromHand  = parentHand.some(c => c === top || c.startsWith(top));
-      const fromTrash = parentTrash.some(c => c === top || c.startsWith(top));
-      if (fromHand || fromTrash) {
-        events.push(`${under}→${top}進化`);
-        continue;
-      }
-      // それ以外のスタック
-      events.push(`${under}→${top}`);
+    // 最初の（でtopとunderに分割
+    const firstParen = card.indexOf('（');
+    const top   = firstParen !== -1 ? card.slice(0, firstParen).trim() : card;
+    const under = firstParen !== -1 ? card.slice(firstParen + 1, card.length - 1).trim() : null;
+
+    // 育成エリアから来た単体カード = 移動（スタックにはならない）
+    if (parentBreeding.some(c => c === card)) {
+      events.push(`${top}移動`);
       continue;
     }
 
-    // 育成エリアから来た = 移動
-    if (parentBreeding.some(c => c === card || c.startsWith(card))) {
-      events.push(`${card}移動`);
+    // スタック形式 = 進化
+    if (under !== null) {
+      events.push(`${baseName(under)}→${top}進化`);
       continue;
     }
 
-    // それ以外 = 登場
-    events.push(`${card}登場`);
+    // 単体で新規登場 = 登場
+    events.push(`${top}登場`);
   }
 
   if (events.length === 0) return null;
@@ -898,7 +897,6 @@ function MemoryGauge({ value, onChange, compact, memLabel, t = {} }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {/* 数値表示 */}
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <span style={{ color, fontSize: 20, fontWeight: 900, fontFamily: "monospace" }}>
           {value > 0 ? `+${value}` : value}
@@ -943,23 +941,25 @@ function MemoryGauge({ value, onChange, compact, memLabel, t = {} }) {
 // ============================================================
 // NODE CARD
 // ============================================================
-function BoardNodeCard({ node, parentNode, isSelected, onSelect, onAddChild, onDelete, onToggleCollapse, isDragging, t, blockActions, onBlockStart, onOpenPanel, settings }) {
+function BoardNodeCard({ node, parentNode, isSelected, onSelect, onAddChild, onDelete, onToggleCollapse, isDragging, t, blockActions, onBlockStart, onOpenPanel, settings, htmlExportMode, htmlExportStart, isDescendantOf }) {
   const tag = NODE_TAGS[node.meta.tag] || NODE_TAGS.normal;
   const isRoot = node.parentId === null;
-  // node.meta.colorが未設定ならsettingsのデフォルトカラーを使う
   const effectiveColor = node.meta.color ?? (settings?.defaultNodeColor ?? null);
   const nodeColorDef = NODE_COLORS.find(c => c.value === effectiveColor) || NODE_COLORS[0];
-  // 親ノードと比較して相手SECが減っているか
   const oppSecDiff = parentNode ? node.state.oppSecurity - parentNode.state.oppSecurity : 0;
   const oppSecDecreased = oppSecDiff < 0;
 
-  // ノード本体のpointerDownで選択＋ブロック開始（clickより先に発火）
+  // HTML出力モード時のハイライト
+  const isExportStart = htmlExportMode && htmlExportStart === node.id;
+  const isExportSelectable = htmlExportMode === 'end' && htmlExportStart
+    && (node.id === htmlExportStart || (isDescendantOf && isDescendantOf(node.id, htmlExportStart)));
+  const isExportDimmed = htmlExportMode === 'end' && !isExportSelectable;
+
   const handleNodePointerDown = (e) => {
     if (!isSelected) {
       onBlockStart && onBlockStart();
       onSelect(node.id);
     } else {
-      // 選択済みを再タップ → 選択解除
       onSelect(null);
     }
   };
@@ -970,47 +970,74 @@ function BoardNodeCard({ node, parentNode, isSelected, onSelect, onAddChild, onD
     fn();
   };
 
+  const phase = node.state.phase || "main";
+  const phaseLabel = getPhaseLabel(t, phase);
+
   return (
+    <div style={{
+      position: "absolute",
+      left: node.position.x,
+      top: node.position.y,
+      width: NODE_W,
+      fontFamily: "monospace",
+      zIndex: isSelected ? 10 : 1,
+    }}>
+      {/* フェイズラベル（ノード外側左上） */}
+      <div style={{
+        position: "absolute", top: -16, left: 4,
+        fontSize: 9, color: "#4a9eff99", fontWeight: 700,
+        letterSpacing: 0.5, whiteSpace: "nowrap",
+        pointerEvents: "none",
+      }}>{phaseLabel}</div>
+
     <div
       onPointerDown={e => { e.stopPropagation(); handleNodePointerDown(e); }}
       data-nodeid={node.id}
       style={{
-        position: "absolute",
-        left: node.position.x,
-        top: node.position.y,
         width: NODE_W,
         boxSizing: "border-box",
         background: nodeColorDef.value
           ? `linear-gradient(160deg, ${nodeColorDef.value}, ${nodeColorDef.bg})`
           : `linear-gradient(160deg, #0f172a, #131f30)`,
-        border: oppSecDecreased
+        border: isExportStart
+          ? `2px solid #f59e0b`
+          : isExportSelectable
+          ? `2px solid #22c55e`
+          : oppSecDecreased
             ? `1.5px solid #ef4444`
             : nodeColorDef.border
               ? `2px solid ${nodeColorDef.border}`
               : `1.5px solid ${isSelected ? "#ffffff" : "#243040"}`,
-        outline: isSelected ? "4px solid #ffffff" : "none",
+        outline: isExportStart ? "3px solid #f59e0b88"
+          : isExportSelectable ? "3px solid #22c55e88"
+          : isSelected ? "4px solid #ffffff" : "none",
         outlineOffset: "1px",
         borderRadius: 10,
-        cursor: isDragging ? "grabbing" : "grab",
+        cursor: htmlExportMode ? (isExportSelectable || htmlExportMode === 'start' ? "pointer" : "not-allowed") : isDragging ? "grabbing" : "grab",
         userSelect: "none",
-        boxShadow: isSelected
+        opacity: isExportDimmed ? 0.35 : 1,
+        boxShadow: isExportStart
+          ? `0 0 0 3px #f59e0b88, 0 0 20px #f59e0b44`
+          : isExportSelectable
+          ? `0 0 0 2px #22c55e88, 0 0 16px #22c55e44`
+          : isSelected
           ? `0 0 0 3px #ffffff88, 0 0 24px #ffffff44, 0 6px 24px #000a`
           : nodeColorDef.border && !oppSecDecreased
             ? `0 0 0 2px ${nodeColorDef.border}55, 0 0 16px ${nodeColorDef.border}33, 0 3px 12px #0008`
             : "0 3px 12px #0008",
         transition: isDragging ? "none" : "box-shadow 0.12s",
         fontFamily: "monospace",
-        zIndex: isSelected ? 10 : 1,
         minWidth: 0,
       }}
     >
-      {/* タグライン */}
       <div style={{ height: 3, background: oppSecDecreased ? "#ef4444" : nodeColorDef.border ?? tag.color, borderRadius: "8px 8px 0 0" }} />
 
-      {/* 本体 */}
       <div style={{ padding: "7px 9px 4px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
           <div style={{ fontSize: 12, color: "#dde4f0", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
+            {node.state.oppSecurity < 0 && (
+              <span style={{ color: "#22c55e", marginRight: 4 }}>【勝ち】</span>
+            )}
             {getNodeLabel(node.meta.label, t)}
           </div>
           {node.children.length > 0 && (
@@ -1051,7 +1078,6 @@ function BoardNodeCard({ node, parentNode, isSelected, onSelect, onAddChild, onD
         </div>
 
         <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center" }}>
-          {/* リソース表示（settings.visibleResourceKeys・resourceSize対応） */}
           {(() => {
             const visible = settings?.visibleResourceKeys ?? ["mySecurity","oppSecurity","myHand","myDeck","oppDeck","myTrash"];
             const sz = settings?.resourceSize ?? "normal";
@@ -1105,13 +1131,11 @@ function BoardNodeCard({ node, parentNode, isSelected, onSelect, onAddChild, onD
                 });
             return (
               <div style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 4 }}>
-                {/* 1行目: SEC + ドロー */}
                 {[...top, ...middle].length > 0 && (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
                     {renderRes([...top, ...middle])}
                   </div>
                 )}
-                {/* 2行目: 山札 + 捨札 */}
                 {[...bottom, ...bottom2].length > 0 && (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
                     {renderRes([...bottom, ...bottom2])}
@@ -1122,12 +1146,8 @@ function BoardNodeCard({ node, parentNode, isSelected, onSelect, onAddChild, onD
           })()}
         </div>
 
-        {/* ゾーン表示（showZones=trueなら全エリアを表示） */}
         {node.meta.showZones !== false && getZoneDefs(t).filter(({ key }) => {
-          // hiddenZonesに入っていれば非表示
           if ((node.meta.hiddenZones || []).includes(key)) return false;
-          // hiddenZonesに入っていなければ、settings.visibleZoneKeysで判定
-          // ただしhiddenZonesで明示的に「表示中」にしている場合はsettingsより優先
           const visKeys = (settings?.visibleZoneKeys) ?? ZONE_KEYS;
           return visKeys.includes(key);
         }).map(({ key, label, color }) => {
@@ -1175,7 +1195,6 @@ function BoardNodeCard({ node, parentNode, isSelected, onSelect, onAddChild, onD
         )}
       </div>
 
-      {/* アクションボタン（ノード右側に縦並び） */}
       {isSelected && (
         <div style={{
           position: "absolute", top: 0, left: NODE_W + 8,
@@ -1196,6 +1215,7 @@ function BoardNodeCard({ node, parentNode, isSelected, onSelect, onAddChild, onD
           {node.children.length}
         </div>
       )}
+    </div>
     </div>
   );
 }
@@ -1258,39 +1278,36 @@ const ZONE_KEYS = ["hand","breeding","main","trash","deck","security"];
 const ZONE_COLORS = { hand: "#22c55e", breeding: "#4a9eff", main: "#f59e0b", trash: "#94a3b8", deck: "#a855f7", security: "#ef4444" };
 const ZONE_LABEL_KEYS = { hand: "zone_hand", breeding: "zone_breeding", main: "zone_main", trash: "zone_trash", deck: "zone_deck", security: "zone_security" };
 const getZoneDefs = (t) => ZONE_KEYS.map(key => ({ key, label: t[ZONE_LABEL_KEYS[key]] || key, color: ZONE_COLORS[key] }));
-// 後方互換性のためデフォルトのZONE_DEFSも保持
 const ZONE_DEFS = [
   { key: "hand",     label: "手札",         color: "#22c55e" },
   { key: "breeding", label: "育成エリア",   color: "#4a9eff" },
-  { key: "main",     label: "メインエリア", color: "#f59e0b" },
+  { key: "main",     label: "バトルエリア", color: "#f59e0b" },
   { key: "trash",    label: "トラッシュ",   color: "#94a3b8" },
   { key: "deck",     label: "山札",         color: "#a855f7" },
   { key: "security", label: "セキュリティ", color: "#ef4444" },
 ];
 
-function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, parentZones, onPropagateUp, t = {}, settings = {}, moveTarget, setMoveTarget }) {
+function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, parentZones, onPropagateUp, t = {}, settings = {}, moveTarget, setMoveTarget, deleteMode = false, selectedCards = [], setSelectedCards = () => {}, restMode = false, cardStates = {}, onToggleCardState = () => {} }) {
   const [inputs, setInputs] = useState({});
   const [editing, setEditing] = useState({});
   const [diffPreview, setDiffPreview] = useState({});
   const [dragOver, setDragOver] = useState(null);
   const dragRef = useRef(null);
-  const [stackModal, setStackModal] = useState(null); // { card, targetCard, targetKey }
+  const [stackModal, setStackModal] = useState(null);
   const [stackTarget, setStackTarget] = useState(null);
   const [dupConfirm, setDupConfirm] = useState(null);
   const [addModal, setAddModal] = useState(null);
   const [addModalInput, setAddModalInput] = useState('');
-  const addModalInputRef = useRef(null); // 入力欄の表示/非表示
+  const addModalInputRef = useRef(null);
 
   const addCard = (key, forcedVal) => {
     const val = forcedVal !== undefined ? forcedVal : (inputs[key] || "").trim();
     if (!val) return;
     const current = zones[key] || [];
-    // 同名チェック（完全一致または番号付きのベース名が一致）
     const baseName = val.replace(/（\d+）$/, "");
     const hasSame = current.some(c => c === val || c.replace(/（\d+）$/, "") === baseName);
     if (hasSame && !current.some(c => c === val && forcedVal !== undefined)) {
       if (forcedVal !== undefined) {
-        // モーダルからの呼び出し時も同名確認
         const nums = current
           .map(c => { const m = c.match(/^(.+)（(\d+)）$/); return m && m[1] === baseName ? parseInt(m[2]) : null; })
           .filter(n => n !== null);
@@ -1299,7 +1316,6 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
         setDupConfirm({ key, val, numbered });
         return;
       }
-      // 番号付き候補を生成
       const nums = current
         .map(c => { const m = c.match(/^(.+)（(\d+)）$/); return m && m[1] === baseName ? parseInt(m[2]) : null; })
         .filter(n => n !== null);
@@ -1332,11 +1348,10 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
 
   const zoneDefs = getZoneDefs(t);
   const totalCards = zoneDefs.reduce((acc, { key }) => acc + (zones[key] || []).length, 0);
-  const showOnNode = true; // 常に表示
+  const showOnNode = true;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {/* スタック選択モーダル */}
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0, width: "100%" }}>
       {stackModal && (
         <div style={{
           position: "fixed", inset: 0, background: "#000b", zIndex: 300,
@@ -1356,7 +1371,6 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
               <span style={{ color: "#f59e0b", fontWeight: 700 }}>「{stackModal.targetCard}」</span>
               {" "}{t.stack_against || "に対して："}
             </div>
-            {/* Aの上に重ねる */}
             <button onClick={() => {
               const { card, fromKey, targetCard, targetKey, zonesSnapshot } = stackModal;
               const newCard = `${card}（${targetCard}）`;
@@ -1379,7 +1393,6 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
               background: "#4a9eff18", border: "1px solid #4a9eff66", color: "#4a9eff",
               fontSize: 13, fontWeight: 700,
             }}>「{stackModal.targetCard}」{t.stack_on_top || "の上に重ねる"} → {stackModal.card}（{stackModal.targetCard}）</button>
-            {/* Aの下に重ねる */}
             <button onClick={() => {
               const { card, fromKey, targetCard, targetKey, zonesSnapshot } = stackModal;
               const newCard2 = `${targetCard}（${card}）`;
@@ -1402,7 +1415,6 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
               background: "#a855f718", border: "1px solid #a855f766", color: "#a855f7",
               fontSize: 13, fontWeight: 700,
             }}>「{stackModal.targetCard}」{t.stack_on_bottom || "の下に重ねる"} → {stackModal.targetCard}（{stackModal.card}）</button>
-            {/* 同じエリアに出す */}
             <button onClick={() => {
               const newZones = JSON.parse(JSON.stringify(zones));
               newZones[stackModal.fromKey] = (newZones[stackModal.fromKey] || []).filter(c => c !== stackModal.card);
@@ -1419,7 +1431,6 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
             <button onClick={() => {
               if (stackModal.zonesSnapshot) onChange(stackModal.zonesSnapshot);
               setStackModal(null);
-              // 操作モードは継続（moveTargetは初期状態に戻すだけ）
               setMoveTarget({ mode: "move", fromKey: null, card: null });
             }} style={{
               padding: "8px 0", borderRadius: 6, cursor: "pointer",
@@ -1430,7 +1441,6 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
         </div>
       )}
 
-      {/* カード枚数バッジ */}
       {totalCards > 0 && (
         <span style={{
           background: "#4a9eff33", color: "#4a9eff",
@@ -1439,7 +1449,6 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
         }}>{totalCards}</span>
       )}
 
-      {/* 重複確認UI */}
       {dupConfirm && (
         <div style={{
           background: "#f59e0b18", border: "1px solid #f59e0b66",
@@ -1476,7 +1485,6 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
         </div>
       )}
 
-      {/* 入力モーダル */}
       {addModal && (
         <div style={{
           position: "fixed", inset: 0, background: "#000a", zIndex: 200,
@@ -1488,11 +1496,9 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
             width: "100%", maxWidth: 480,
             display: "flex", flexDirection: "column", gap: 10,
           }}>
-            {/* エリア名 */}
             <div style={{ fontSize: 13, color: addModal.color, fontWeight: 700, fontFamily: "monospace" }}>
               {addModal.label}
             </div>
-            {/* 登録済みカード一覧 */}
             {(zones[addModal.key] || []).length > 0 && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                 {(zones[addModal.key] || []).map(card => {
@@ -1516,7 +1522,6 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
                 })}
               </div>
             )}
-            {/* 入力欄 */}
             <input
               ref={addModalInputRef}
               autoFocus
@@ -1550,19 +1555,19 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
       )}
 
       {showOnNode && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, minWidth: 0, width: "100%" }}>
           {zoneDefs.map(({ key, label, color }) => {
             const cards = zones[key] || [];
             const isHidden = hiddenZones.includes(key);
             return (
-              <div key={key} style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-                {/* エリアカード */}
+              <div key={key} style={{ display: "flex", flexDirection: "column", gap: 0, minWidth: 0 }}>
                 <div style={{
                   background: "#0b1320",
                   border: `1px solid ${moveTarget?.card && moveTarget.fromKey !== key ? color + "88" : isHidden ? "#1a2535" : color + "44"}`,
                   borderRadius: "8px 8px 0 0", padding: "6px 8px",
                   opacity: isHidden ? 0.4 : 1,
                   flex: 1, display: "flex", flexDirection: "column", gap: 4,
+                  minWidth: 0, overflowX: "hidden",
                   cursor: moveTarget?.card && moveTarget.fromKey !== key ? "pointer" : "default",
                   boxShadow: moveTarget?.card && moveTarget.fromKey !== key ? `0 0 8px ${color}44` : "none",
                 }} onClick={() => {
@@ -1576,11 +1581,9 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
                     setMoveTarget({ mode: "move", fromKey: null, card: null });
                   }
                 }}>
-                  {/* ヘッダー */}
                   <div style={{ display: "flex", alignItems: "center" }}>
                     <span style={{ fontSize: 11, color, fontWeight: 800 }}>{label}</span>
                   </div>
-                  {/* カード一覧 */}
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 3, minHeight: 20 }}>
                     {cards.length === 0
                       ? <span style={{ fontSize: 9, color: "#2a3a52", fontStyle: "italic" }}>{t.none_label || "なし"}</span>
@@ -1588,40 +1591,66 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
                           const parentCards = parentZones?.[key] || [];
                           const isNew = !parentCards.includes(card);
                           const isMoving = moveTarget?.card === card && moveTarget?.fromKey === key;
+                          const isRest = cardStates[`${key}:${card}`] === "rest";
+                          const stateIcon = isRest ? "▶︎" : "▲";
                           return (
                             <span key={card} onClick={() => {
                               if (stackModal) return;
+                              if (deleteMode) {
+                                setSelectedCards(prev =>
+                                  prev.some(s => s.key === key && s.card === card)
+                                    ? prev.filter(s => !(s.key === key && s.card === card))
+                                    : [...prev, { key, card }]
+                                );
+                                return;
+                              }
+                              if (restMode) {
+                                onToggleCardState(key, card);
+                                return;
+                              }
                               if (moveTarget?.mode === "move") {
                                 if (moveTarget.card === null) {
-                                  // 移動元を選択
                                   setMoveTarget({ mode: "move", fromKey: key, card });
-                                } else if (!(moveTarget.card === card && moveTarget.fromKey === key)) {
-                                  // 別のカードをタップ→スタック選択肢を表示（zonesスナップショットを保存）
+                                } else if (moveTarget.card === card && moveTarget.fromKey === key) {
+                                  setMoveTarget({ mode: "move", fromKey: null, card: null });
+                                } else {
                                   setStackModal({ card: moveTarget.card, fromKey: moveTarget.fromKey, targetCard: card, targetKey: key, zonesSnapshot: JSON.parse(JSON.stringify(zones)) });
                                 }
                               }
                             }} style={{
-                              background: isMoving ? `${color}66` : isNew ? `${color}40` : `${color}18`,
-                              border: `1px solid ${isMoving ? color : isNew ? color : color + "55"}`,
+                              background: deleteMode && selectedCards.some(s => s.key === key && s.card === card)
+                                ? `#ef444444`
+                                : deleteMode ? `#ef444412`
+                                : restMode ? `${color}28`
+                                : isMoving ? `${color}66` : isNew ? `${color}40` : `${color}18`,
+                              border: `1px solid ${
+                                deleteMode && selectedCards.some(s => s.key === key && s.card === card)
+                                  ? "#ef4444"
+                                  : deleteMode ? "#ef444444"
+                                  : restMode ? color + "88"
+                                  : isMoving ? color : isNew ? color : color + "55"
+                              }`,
                               borderRadius: 6, padding: "5px 8px",
-                              fontSize: 11, color, fontWeight: isNew ? 700 : 400,
-                              display: "flex", alignItems: "center", gap: 6,
+                              fontSize: 11,
+                              color: deleteMode ? "#ef4444" : color,
+                              fontWeight: isNew ? 700 : 400,
+                              display: "flex", alignItems: "center", gap: 4,
                               overflow: "hidden",
-                              cursor: moveTarget?.mode === "move" ? "pointer" : "default",
-                              boxShadow: isMoving ? `0 0 6px ${color}88` : "none",
+                              cursor: "pointer",
+                              boxShadow: isMoving ? `0 0 6px ${color}88` : isRest ? `0 0 4px ${color}44` : "none",
+                              opacity: isRest ? 0.7 : 1,
                             }}>
+                              <span style={{ fontSize: 9, flexShrink: 0, opacity: 0.8 }}>{stateIcon}</span>
                               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{card}</span>
-                              {!moveTarget && <button onClick={e => { e.stopPropagation(); removeCard(key, card); }} style={{
-                                background: "none", border: "none", color: "#ef4444",
-                                cursor: "pointer", fontSize: 13, padding: "0 2px", lineHeight: 1, flexShrink: 0,
-                              }}>×</button>}
+                              {deleteMode && selectedCards.some(s => s.key === key && s.card === card) && (
+                                <span style={{ fontSize: 11, flexShrink: 0 }}>✓</span>
+                              )}
                             </span>
                           );
                         })
                     }
                   </div>
                 </div>
-                {/* 追加ボタン（下に配置） */}
                 <button onClick={() => { setAddModal({ key, color, label }); setAddModalInput(''); }} style={{
                   background: `${color}22`, border: `1px solid ${color}55`, color,
                   borderRadius: "0 0 8px 8px", padding: "6px 0", cursor: "pointer",
@@ -1633,6 +1662,407 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
         </div>
       )}
 
+      {/* 削除モード時の削除実行ボタン */}
+      {deleteMode && (
+        <button
+          onClick={() => {
+            if (selectedCards.length === 0) return;
+            const newZones = JSON.parse(JSON.stringify(zones));
+            selectedCards.forEach(({ key, card }) => {
+              newZones[key] = (newZones[key] || []).filter(c => c !== card);
+            });
+            onChange(newZones);
+            setSelectedCards([]);
+          }}
+          style={{
+            width: "100%", padding: "10px 0", borderRadius: 6, cursor: "pointer",
+            background: selectedCards.length > 0 ? "#ef444422" : "#1a2535",
+            border: `1px solid ${selectedCards.length > 0 ? "#ef4444" : "#2a3a52"}`,
+            color: selectedCards.length > 0 ? "#ef4444" : "#4a5568",
+            fontSize: 13, fontFamily: "monospace", fontWeight: 700,
+            marginTop: 4,
+          }}
+        >
+          🗑 {selectedCards.length > 0 ? `${selectedCards.length}枚を削除` : "カードを選択してください"}
+        </button>
+      )}
+
+    </div>
+  );
+}
+
+// ============================================================
+// BOARD LAYOUT VIEW（プレイシート風）
+// ============================================================
+function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentState = {}, cardStates = {}, onToggleCardState = null, note = undefined }) {
+  const z = zones;
+
+  const isNew = (key, card) => !((parentZones[key] || []).includes(card));
+
+  const CardChip = ({ card, zoneKey, color }) => {
+    const _isNew = isNew(zoneKey, card);
+    const isRest = cardStates[`${zoneKey}:${card}`] === "rest";
+    return (
+      <span
+        onClick={() => onToggleCardState && onToggleCardState(zoneKey, card)}
+        style={{
+          background: _isNew ? `${color}40` : `${color}18`,
+          border: `1px solid ${_isNew ? color : color + "55"}`,
+          borderRadius: 4, padding: "2px 6px",
+          fontSize: 10, color,
+          fontWeight: _isNew ? 700 : 400,
+          wordBreak: "break-all", display: "inline-flex", alignItems: "center", gap: 3,
+          lineHeight: 1.4,
+          opacity: isRest ? 0.7 : 1,
+          cursor: onToggleCardState ? "pointer" : "default",
+        }}>
+        <span style={{ fontSize: 8, flexShrink: 0 }}>{isRest ? "▶︎" : "▲"}</span>
+        <span>{card}{_isNew && <span style={{ fontSize: 7, marginLeft: 2 }}>★</span>}</span>
+      </span>
+    );
+  };
+
+  const ZoneBox = ({ label, zoneKey, color, style = {}, children }) => {
+    const cards = z[zoneKey] || [];
+    return (
+      <div style={{
+        background: "#090f1e",
+        border: `1px solid ${color}66`,
+        borderRadius: 6, padding: "6px 8px",
+        display: "flex", flexDirection: "column", gap: 4,
+        ...style,
+      }}>
+        <div style={{ fontSize: 9, color, fontWeight: 700, letterSpacing: 1, flexShrink: 0 }}>{label}</div>
+        {children || (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+            {cards.length === 0
+              ? <span style={{ fontSize: 9, color: "#2a3a52", fontStyle: "italic" }}>{t.none_label || "なし"}</span>
+              : cards.map((card, i) => <CardChip key={i} card={card} zoneKey={zoneKey} color={color} />)
+            }
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const secCards = z.security || [];
+
+  // メモリー値
+  const mem = state.memory ?? 0;
+  const MAX_MEM = 10;
+
+  // リソース差分
+  const diff = (key) => {
+    const cur = state[key] ?? 0;
+    const par = parentState[key] ?? cur;
+    return cur - par;
+  };
+
+  const phaseKey = state.phase || "main";
+  const phaseName = t["ph_" + phaseKey] || phaseKey;
+
+  return (
+    <div style={{
+      width: "100%", height: "100%", boxSizing: "border-box",
+      display: "flex", flexDirection: "column", gap: 6,
+      fontFamily: "monospace",
+    }}>
+
+      {/* フェイズ表示 */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "center",
+        background: "#4a9eff18", border: "1px solid #4a9eff44",
+        borderRadius: 6, padding: "5px 0", flexShrink: 0,
+      }}>
+        <span style={{ fontSize: 12, color: "#4a9eff", fontWeight: 700, letterSpacing: 2 }}>
+          {phaseName}
+        </span>
+      </div>
+
+      {/* 1行目：メモリーゲージ */}
+      <div style={{
+        background: "#090f1e", border: "1px solid #1a2535",
+        borderRadius: 6, padding: "6px 10px",
+        display: "flex", flexDirection: "column", gap: 4, flexShrink: 0,
+      }}>
+        <div style={{ fontSize: 9, color: "#4a9eff", fontWeight: 700, letterSpacing: 1 }}>MEMORY</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 1, overflow: "hidden" }}>
+          {/* 左側（正・自分側）: 10→1 */}
+          <div style={{ display: "flex", gap: 1, flex: 1, justifyContent: "flex-end", minWidth: 0 }}>
+            {Array.from({ length: MAX_MEM }, (_, i) => MAX_MEM - i).map(n => {
+              const active = mem >= n;
+              return (
+                <div key={n} style={{
+                  flex: 1, minWidth: 0, aspectRatio: "1/1", borderRadius: "50%",
+                  background: active ? "#4a9eff" : "#0b1320",
+                  border: `1px solid ${active ? "#4a9eff" : "#1a2535"}`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 8, color: active ? "#000" : "#2a3a52", fontWeight: 700,
+                  maxWidth: 24,
+                }}>{n}</div>
+              );
+            })}
+          </div>
+          {/* 中央：0 */}
+          <div style={{
+            width: 24, height: 24, borderRadius: "50%", flexShrink: 0,
+            background: mem === 0 ? "#94a3b8" : "#0b1320",
+            border: `2px solid ${mem === 0 ? "#94a3b8" : "#2a3a52"}`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 9, color: mem === 0 ? "#000" : "#2a3a52", fontWeight: 900,
+          }}>0</div>
+          {/* 右側（負・相手側）: 1→10 */}
+          <div style={{ display: "flex", gap: 1, flex: 1, minWidth: 0 }}>
+            {Array.from({ length: MAX_MEM }, (_, i) => i + 1).map(n => {
+              const active = mem <= -n;
+              return (
+                <div key={n} style={{
+                  flex: 1, minWidth: 0, aspectRatio: "1/1", borderRadius: "50%",
+                  background: active ? "#ef4444" : "#0b1320",
+                  border: `1px solid ${active ? "#ef4444" : "#1a2535"}`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 8, color: active ? "#000" : "#2a3a52", fontWeight: 700,
+                  maxWidth: 24,
+                }}>{n}</div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* 2行目：自SEC / 相SEC / 自ドロー */}
+      <div style={{
+        display: "flex", gap: 6, flexShrink: 0,
+      }}>
+        {[
+          { label: t.my_sec || "自SEC",  key: "mySecurity",  color: "#4a9eff" },
+          { label: t.opp_sec || "相SEC", key: "oppSecurity", color: "#ef4444" },
+          { label: t.my_hand_label || "自ドロー", key: "myHand", color: "#22c55e" },
+        ].map(({ label, key, color }) => {
+          const val = state[key] ?? 0;
+          const d = diff(key);
+          return (
+            <div key={key} style={{
+              flex: 1, background: "#090f1e", border: `1px solid ${color}44`,
+              borderRadius: 6, padding: "5px 8px",
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 1,
+            }}>
+              <div style={{ fontSize: 9, color, fontWeight: 700 }}>{label}</div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
+                <span style={{ fontSize: 22, fontWeight: 900, color }}>{val}</span>
+                {d !== 0 && (
+                  <span style={{ fontSize: 11, fontWeight: 700, color: d > 0 ? "#22c55e" : "#ef4444" }}>
+                    {d > 0 ? `+${d}` : d}
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 上段：Security（左） + Battle area（中） + Deck/Trash（右） */}
+      {(() => {
+        const isWin = (state.oppSecurity ?? 0) < 0;
+        return (
+          <div style={{ display: "flex", gap: 6, flex: 3, position: "relative" }}>
+            {isWin && (
+              <div style={{
+                position: "absolute", inset: 0, zIndex: 10,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                pointerEvents: "none",
+              }}>
+                <span style={{
+                  fontSize: 36, fontWeight: 900, color: "#22c55e",
+                  textShadow: "0 0 20px #22c55e, 0 0 40px #22c55e88",
+                  fontFamily: "monospace", letterSpacing: 4,
+                }}>【勝ち】</span>
+              </div>
+            )}
+
+        {/* Security：枚数に応じて縦積み */}
+        <div style={{
+          display: "flex", flexDirection: "column", gap: 3,
+          width: 80, flexShrink: 0,
+        }}>
+          <div style={{ fontSize: 9, color: "#ef4444", fontWeight: 700, letterSpacing: 1 }}>
+            Security
+            <span style={{ marginLeft: 4, fontSize: 10 }}>({secCards.length})</span>
+          </div>
+          {secCards.length === 0 ? (
+            /* 0枚：空枠を1つ表示 */
+            <div style={{
+              flex: 1, background: "#090f1e",
+              border: "1px solid #1a2535",
+              borderRadius: 4, padding: "3px 5px",
+              display: "flex", alignItems: "center", minHeight: 24,
+            }}>
+              <span style={{ fontSize: 8, color: "#1a2535" }}>—</span>
+            </div>
+          ) : (
+            /* 枚数分のカードを縦積み（上が最後に追加されたカード） */
+            [...secCards].reverse().map((card, i) => {
+              const _isNew = isNew("security", card);
+              return (
+                <div key={i} style={{
+                  background: _isNew ? "#ef444430" : "#ef444415",
+                  border: `1px solid ${_isNew ? "#ef4444" : "#ef444455"}`,
+                  borderRadius: 4, padding: "3px 5px",
+                  display: "flex", alignItems: "center",
+                  minHeight: 22,
+                }}>
+                  <span style={{ fontSize: 9, color: "#ef4444", wordBreak: "break-all", lineHeight: 1.3, fontWeight: _isNew ? 700 : 400 }}>
+                    {card}{_isNew && <span style={{ fontSize: 7, marginLeft: 2 }}>★</span>}
+                  </span>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Battle area：中央、大きく */}
+        <ZoneBox
+          label="Battle area"
+          zoneKey="main"
+          color="#f59e0b"
+          style={{ flex: 1 }}
+        />
+
+        {/* Deck / Trash：右側縦並び */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, width: 80, flexShrink: 0 }}>
+          <ZoneBox label="Deck" zoneKey="deck" color="#a855f7" style={{ flex: 1 }} />
+          <ZoneBox label="Trash" zoneKey="trash" color="#94a3b8" style={{ flex: 1 }} />
+        </div>
+
+      </div>
+        );
+      })()}
+
+      {/* 下段：育成エリア（左） + 手札（右） */}
+      <div style={{ display: "flex", gap: 6, flex: 2 }}>
+
+        {/* 育成エリア */}
+        <div style={{
+          background: "#090f1e",
+          border: "1px solid #4a9eff66",
+          borderRadius: 6, padding: "6px 8px",
+          display: "flex", flexDirection: "column", gap: 4,
+          width: 160, flexShrink: 0,
+        }}>
+          <div style={{ fontSize: 9, color: "#4a9eff", fontWeight: 700, letterSpacing: 1 }}>
+            育成エリア / Raising area
+          </div>
+          <div style={{ display: "flex", gap: 4, flex: 1 }}>
+            {/* Digitamaスロット */}
+            <div style={{
+              flex: 1, background: "#0b1a2e",
+              border: "1px solid #4a9eff44",
+              borderRadius: 4, padding: "4px",
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2,
+            }}>
+              <span style={{ fontSize: 8, color: "#4a9eff88" }}>Digitama</span>
+            </div>
+            {/* 育成カードスロット */}
+            <div style={{
+              flex: 1, background: "#090f1e",
+              border: "1px solid #4a9eff44",
+              borderRadius: 4, padding: "4px",
+              display: "flex", flexWrap: "wrap", gap: 2, alignContent: "flex-start",
+            }}>
+              {(z.breeding || []).length === 0
+                ? <span style={{ fontSize: 8, color: "#2a3a52", fontStyle: "italic" }}>{t.none_label || "なし"}</span>
+                : (z.breeding || []).map((card, i) => <CardChip key={i} card={card} zoneKey="breeding" color="#4a9eff" />)
+              }
+            </div>
+          </div>
+        </div>
+
+        {/* 手札 */}
+        <ZoneBox label={t.zone_hand || "手札"} zoneKey="hand" color="#22c55e" style={{ flex: 1 }} />
+
+      </div>
+
+      {/* メモ */}
+      {note !== undefined && (
+        <div style={{
+          background: "#090f1e", border: "1px solid #243040",
+          borderRadius: 6, padding: "6px 10px", flexShrink: 0,
+        }}>
+          <div style={{ fontSize: 9, color: "#4a9eff", fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>📝 MEMO</div>
+          {note
+            ? <div style={{ fontSize: 12, color: "#7a90a8", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{note}</div>
+            : <div style={{ fontSize: 11, color: "#2a3a52", fontStyle: "italic" }}>{t.none_label || "なし"}</div>
+          }
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+// ============================================================
+// BOARD VIEW MODAL
+// ============================================================
+function BoardViewModal({ boardViewNodeId, setBoardViewNodeId, setBoardView, nodes, selectedNode, t, onUpdateNode }) {
+  const [childModal, setChildModal] = useState(false);
+  const bvNode = boardViewNodeId ? nodes[boardViewNodeId] : selectedNode;
+  if (!bvNode) return null;
+  const bvParent = bvNode.parentId ? nodes[bvNode.parentId] : null;
+
+  const toggleCardState = (key, card) => {
+    const cs = JSON.parse(JSON.stringify(bvNode.meta.cardStates || {}));
+    const k = `${key}:${card}`;
+    cs[k] = cs[k] === "rest" ? "active" : "rest";
+    const next = JSON.parse(JSON.stringify(bvNode));
+    next.meta.cardStates = cs;
+    onUpdateNode && onUpdateNode(next);
+  };
+
+  const goParent = () => { if (bvNode.parentId) setBoardViewNodeId(bvNode.parentId); };
+  const goChild = () => {
+    const ch = bvNode.children || [];
+    if (ch.length === 1) setBoardViewNodeId(ch[0]);
+    else if (ch.length > 1) setChildModal(true);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#000c", zIndex: 500, display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, background: "#060c18", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {/* ヘッダー */}
+        <div style={{ padding: "10px 16px", background: "#0b1320", borderBottom: "1px solid #1a2535", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          <button onClick={() => { setBoardView(false); setBoardViewNodeId(null); }} style={{
+            background: "none", border: "1px solid #2a3a52", color: "#7a90a8",
+            cursor: "pointer", fontSize: 13, fontFamily: "monospace", fontWeight: 700,
+            padding: "5px 10px", borderRadius: 5, flexShrink: 0,
+          }}>戻る</button>
+          <span style={{ fontSize: 13, color: "#4a9eff", fontWeight: 700, fontFamily: "monospace", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            🎴 {getNodeLabel(bvNode.meta.label, t)}
+          </span>
+        </div>
+        {/* 前後移動 */}
+        <div style={{ display: "flex", gap: 6, padding: "8px 16px", background: "#0b1320", borderBottom: "1px solid #1a2535", flexShrink: 0 }}>
+          <button onClick={goParent} disabled={!bvNode.parentId} style={{ flex: 1, padding: "8px 0", borderRadius: 6, cursor: bvNode.parentId ? "pointer" : "default", background: bvNode.parentId ? "#4a9eff18" : "#0b1320", border: `1px solid ${bvNode.parentId ? "#4a9eff55" : "#1a2535"}`, color: bvNode.parentId ? "#4a9eff" : "#2a3a52", fontSize: 13, fontFamily: "monospace", fontWeight: 700 }}>← 前</button>
+          <button onClick={goChild} disabled={!bvNode.children?.length} style={{ flex: 1, padding: "8px 0", borderRadius: 6, cursor: bvNode.children?.length ? "pointer" : "default", background: bvNode.children?.length ? "#4a9eff18" : "#0b1320", border: `1px solid ${bvNode.children?.length ? "#4a9eff55" : "#1a2535"}`, color: bvNode.children?.length ? "#4a9eff" : "#2a3a52", fontSize: 13, fontFamily: "monospace", fontWeight: 700 }}>次 {bvNode.children?.length > 1 ? `(${bvNode.children.length}択)` : "→"}</button>
+        </div>
+        {/* 子選択モーダル */}
+        {childModal && (
+          <div style={{ position: "absolute", inset: 0, background: "#000b", zIndex: 10, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setChildModal(false)}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#0f1a28", border: "1px solid #4a9eff55", borderRadius: 12, padding: "20px 24px", width: 280, fontFamily: "monospace", display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ fontSize: 14, color: "#dde4f0", fontWeight: 700 }}>次のノードを選択</div>
+              {(bvNode.children || []).map(childId => {
+                const child = nodes[childId];
+                if (!child) return null;
+                return <button key={childId} onClick={() => { setBoardViewNodeId(childId); setChildModal(false); }} style={{ padding: "10px 14px", borderRadius: 6, cursor: "pointer", background: "#4a9eff18", border: "1px solid #4a9eff55", color: "#4a9eff", fontSize: 13, fontFamily: "monospace", fontWeight: 700, textAlign: "left" }}>{getNodeLabel(child.meta.label, t)}</button>;
+              })}
+              <button onClick={() => setChildModal(false)} style={{ padding: "8px 0", borderRadius: 6, cursor: "pointer", background: "none", border: "1px solid #2a3a52", color: "#7a90a8", fontSize: 12, fontFamily: "monospace" }}>キャンセル</button>
+            </div>
+          </div>
+        )}
+        {/* 盤面 */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px", boxSizing: "border-box" }}>
+          <BoardLayout zones={bvNode.meta.zones || {}} parentZones={bvParent?.meta?.zones} t={t} state={bvNode.state || {}} parentState={bvParent?.state || {}} cardStates={bvNode.meta.cardStates || {}} onToggleCardState={toggleCardState} note={bvNode.meta.note} />
+        </div>
+      </div>
     </div>
   );
 }
@@ -1640,9 +2070,36 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
 // ============================================================
 // DETAIL PANEL
 // ============================================================
-function NodeDetailPanel({ node, parentNode, onUpdate, onClose, onDelete, onAddChild, onPropagateUp, isMobile, t, blockActions, settings, onUpdateSettings }) {
+function NodeDetailPanel({ node, parentNode, onUpdate, onClose, onDelete, onAddChild, onPropagateUp, isMobile, t, blockActions, settings, onUpdateSettings, nodes = {}, onSelectNode, boardView, setBoardView, boardViewNodeId, setBoardViewNodeId, onUndo }) {
   const [panelTab, setPanelTab] = React.useState('board');
-  const [moveTarget, setMoveTarget] = React.useState(null);
+  const [moveTarget, setMoveTarget] = React.useState({ mode: "move", fromKey: null, card: null });
+  const [deleteMode, setDeleteMode] = React.useState(false);
+  const [selectedCards, setSelectedCards] = React.useState([]);
+  const [childSelectModal, setChildSelectModal] = React.useState(false);
+  const [boardViewChildModal, setBoardViewChildModal] = React.useState(false);
+  const [restMode, setRestMode] = React.useState(false);
+
+  // 盤面ビューで表示するノード（boardViewNodeIdがnullなら現在のnode）
+  const boardViewNode = boardViewNodeId ? nodes[boardViewNodeId] : node;
+  const boardViewParent = boardViewNode?.parentId ? nodes[boardViewNode.parentId] : null;
+
+  const openBoardView = () => {
+    setBoardViewNodeId(node.id);
+    setBoardView(true);
+  };
+  const boardViewGoParent = () => {
+    if (!boardViewNode?.parentId) return;
+    setBoardViewNodeId(boardViewNode.parentId);
+  };
+  const boardViewGoChild = () => {
+    const children = boardViewNode?.children || [];
+    if (children.length === 0) return;
+    if (children.length === 1) {
+      setBoardViewNodeId(children[0]);
+    } else {
+      setBoardViewChildModal(true);
+    }
+  };
   const guard = (fn) => () => {
     if (typeof blockActions === 'function' ? blockActions() : blockActions) return;
     fn();
@@ -1673,78 +2130,179 @@ function NodeDetailPanel({ node, parentNode, onUpdate, onClose, onDelete, onAddC
   };
 
   const panelStyle = isMobile ? {
-    position: "fixed", bottom: 0, left: 0, right: 0,
-    height: "85vh", background: "#080e1a",
+    position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+    width: "100%",
+    boxSizing: "border-box",
+    background: "#080e1a",
     borderTop: `2px solid ${tag.color}`,
-    borderRadius: "16px 16px 0 0",
-    zIndex: 100, display: "flex", flexDirection: "column",
-    boxShadow: "0 -8px 32px #000c",
+    zIndex: 200, display: "flex", flexDirection: "column",
+    overflowX: "hidden",
   } : {
     width: 260, flexShrink: 0, background: "#080e1a",
     borderLeft: "1px solid #1a2535",
     display: "flex", flexDirection: "column",
   };
 
+  // 前後ノード移動
+  const goParent = () => {
+    if (!node.parentId || !onSelectNode) return;
+    onSelectNode(node.parentId);
+  };
+  const goChild = () => {
+    if (!onSelectNode) return;
+    const children = node.children || [];
+    if (children.length === 0) return;
+    if (children.length === 1) {
+      onSelectNode(children[0]);
+    } else {
+      setChildSelectModal(true);
+    }
+  };
+
   return (
     <div style={panelStyle}>
+
+      {/* 子ノード選択モーダル */}
+      {childSelectModal && (
+        <div style={{
+          position: "fixed", inset: 0, background: "#000b", zIndex: 200,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }} onClick={() => setChildSelectModal(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: "#0f1a28", border: "1px solid #4a9eff55",
+            borderRadius: 12, padding: "20px 24px", width: 300,
+            fontFamily: "monospace", display: "flex", flexDirection: "column", gap: 10,
+          }}>
+            <div style={{ fontSize: 14, color: "#dde4f0", fontWeight: 700 }}>次のノードを選択</div>
+            {(node.children || []).map(childId => {
+              const child = nodes[childId];
+              if (!child) return null;
+              return (
+                <button key={childId} onClick={() => { onSelectNode(childId); setChildSelectModal(false); }} style={{
+                  padding: "10px 14px", borderRadius: 6, cursor: "pointer",
+                  background: "#4a9eff18", border: "1px solid #4a9eff55", color: "#4a9eff",
+                  fontSize: 13, fontFamily: "monospace", fontWeight: 700, textAlign: "left",
+                }}>{getNodeLabel(child.meta.label, t)}</button>
+              );
+            })}
+            <button onClick={() => setChildSelectModal(false)} style={{
+              padding: "8px 0", borderRadius: 6, cursor: "pointer",
+              background: "none", border: "1px solid #2a3a52", color: "#7a90a8",
+              fontSize: 12, fontFamily: "monospace",
+            }}>キャンセル</button>
+          </div>
+        </div>
+      )}
       <div style={{
-        padding: "10px 14px 8px",
         borderBottom: "1px solid #1a2535",
-        display: "flex", justifyContent: "space-between", alignItems: "center",
         background: "#0b1320", flexShrink: 0,
-        borderRadius: isMobile ? "16px 16px 0 0" : 0,
       }}>
-        {isMobile && (
-          <div style={{
-            position: "absolute", top: 6, left: "50%", transform: "translateX(-50%)",
-            width: 36, height: 4, background: "#2a3a52", borderRadius: 2,
-          }} />
-        )}
-        {/* 左: 削除ボタン */}
-        <div style={{ marginTop: isMobile ? 8 : 0, minWidth: 60, display: "flex", gap: 6 }}>
-          {node.parentId && (
-            <button onClick={guard(() => onDelete(node.id))} style={{
-              background: "#ef444418", border: "1px solid #ef444466", color: "#ef4444",
+        {/* 1行目：戻る / ノードの削除 / +追加 / × */}
+        <div style={{
+          padding: "8px 14px",
+          display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6,
+        }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            {/* 戻るボタン（モバイルのみ） */}
+            {isMobile && (
+              <button onClick={onClose} style={{
+                background: "none", border: "1px solid #2a3a52", color: "#7a90a8",
+                padding: "5px 10px", borderRadius: 5, cursor: "pointer",
+                fontSize: 13, fontFamily: "monospace", fontWeight: 700,
+              }}>戻る</button>
+            )}
+            {node.parentId && (
+              <button onClick={guard(() => onDelete(node.id))} style={{
+                background: "#ef444418", border: "1px solid #ef444466", color: "#ef4444",
+                padding: "6px 10px", borderRadius: 4, cursor: "pointer",
+                fontSize: 11, fontFamily: "monospace", fontWeight: 700,
+                whiteSpace: "nowrap",
+              }}>🗑 ノードの削除</button>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={guard(() => onAddChild(node.id))} style={{
+              background: "#22c55e18", border: "1px solid #22c55e66", color: "#22c55e",
               padding: "6px 10px", borderRadius: 4, cursor: "pointer",
               fontSize: 11, fontFamily: "monospace", fontWeight: 700,
               whiteSpace: "nowrap",
-            }}>🗑 {t.delete_btn.replace("🗑 ", "")}</button>
-          )}
+            }}>+ 追加</button>
+            <button onClick={onUndo} style={{
+              background: "none", border: "1px solid #2a3a52", color: "#7a90a8",
+              padding: "8px 12px", borderRadius: 6, cursor: "pointer",
+              fontSize: 18, fontFamily: "monospace", fontWeight: 700,
+            }}>↩</button>
+            {!isMobile && (
+              <button onClick={onClose} style={{
+                background: "none", border: "none", color: "#7a90a8",
+                cursor: "pointer", fontSize: 24, lineHeight: 1,
+                width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center",
+              }}>×</button>
+            )}
+          </div>
         </div>
-        {/* 中央: ノード名入力 */}
-        <input
-          value={getNodeLabel(node.meta.label, t)}
-          onChange={e => update("meta.label", e.target.value)}
-          placeholder={t.node_placeholder || "ノード名"}
-          style={{
-            flex: 1, marginTop: isMobile ? 8 : 0, marginLeft: 8, marginRight: 8,
-            background: "none", border: "none", borderBottom: `1px solid ${tag.color}66`,
-            color: tag.color, fontSize: 16, fontWeight: 700, fontFamily: "monospace",
-            outline: "none", padding: "2px 4px", textAlign: "center",
-          }}
-        />
-        {/* 右: +追加 + 閉じるボタン */}
-        <div style={{ marginTop: isMobile ? 8 : 0, minWidth: 60, display: "flex", gap: 6, justifyContent: "flex-end" }}>
-          <button onClick={guard(() => onAddChild(node.id))} style={{
-            background: "#22c55e18", border: "1px solid #22c55e66", color: "#22c55e",
-            padding: "6px 10px", borderRadius: 4, cursor: "pointer",
-            fontSize: 11, fontFamily: "monospace", fontWeight: 700,
-            whiteSpace: "nowrap",
-          }}>+ 追加</button>
-          <button onClick={onClose} style={{
-            background: "none", border: "none", color: "#7a90a8",
-            cursor: "pointer", fontSize: 24, lineHeight: 1,
-            width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center",
-          }}>×</button>
+
+        {/* 2行目：ノード名入力 */}
+        <div style={{ padding: "0 14px 4px" }}>
+          <input
+            value={getNodeLabel(node.meta.label, t)}
+            onChange={e => update("meta.label", e.target.value)}
+            placeholder={t.node_placeholder || "ノード名"}
+            style={{
+              width: "100%", boxSizing: "border-box",
+              background: "none", border: "none", borderBottom: `1px solid ${tag.color}66`,
+              color: tag.color, fontSize: 16, fontWeight: 700, fontFamily: "monospace",
+              outline: "none", padding: "2px 4px", textAlign: "center",
+            }}
+          />
+        </div>
+
+        {/* 3行目：候補ボタン（常に高さ固定） */}
+        <div style={{ padding: "4px 14px 6px", height: 34, boxSizing: "content-box", flexShrink: 0 }}>
+          {parentNode && (() => {
+            const generated = generateLabel(node, parentNode);
+            return generated ? (
+              <button onClick={guard(() => update("meta.label", generated))} style={{
+                width: "100%", height: "100%", borderRadius: 5, cursor: "pointer",
+                background: "#f59e0b18", border: "1px solid #f59e0b44", color: "#f59e0b",
+                fontSize: 11, fontFamily: "monospace", fontWeight: 700,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              }}>
+                <span>✨</span><span>{generated}</span>
+              </button>
+            ) : null;
+          })()}
         </div>
       </div>
 
-      {/* タブバー */}
+      {/* 前後ノード移動バー（モバイルのみ） */}
+      {isMobile && (
+        <div style={{
+          display: "flex", gap: 6, padding: "6px 14px",
+          background: "#0b1320", borderBottom: "1px solid #1a2535", flexShrink: 0,
+        }}>
+          <button onClick={goParent} disabled={!node.parentId} style={{
+            flex: 1, padding: "8px 0", borderRadius: 6, cursor: node.parentId ? "pointer" : "default",
+            background: node.parentId ? "#4a9eff18" : "#0b1320",
+            border: `1px solid ${node.parentId ? "#4a9eff55" : "#1a2535"}`,
+            color: node.parentId ? "#4a9eff" : "#2a3a52",
+            fontSize: 13, fontFamily: "monospace", fontWeight: 700,
+          }}>← 前</button>
+          <button onClick={goChild} disabled={!node.children?.length} style={{
+            flex: 1, padding: "8px 0", borderRadius: 6, cursor: node.children?.length ? "pointer" : "default",
+            background: node.children?.length ? "#4a9eff18" : "#0b1320",
+            border: `1px solid ${node.children?.length ? "#4a9eff55" : "#1a2535"}`,
+            color: node.children?.length ? "#4a9eff" : "#2a3a52",
+            fontSize: 13, fontFamily: "monospace", fontWeight: 700,
+          }}>次 {node.children?.length > 1 ? `(${node.children.length}択)` : "→"}</button>
+        </div>
+      )}
+
       <div style={{ display: "flex", borderBottom: "1px solid #1a2535", flexShrink: 0 }}>
         {[
           { key: "board",    label: t.zone_info    || "盤面" },
           { key: "resource", label: t.resource_label || "リソース" },
-          { key: "node",     label: t.memo_label    || "メモ" },
+          { key: "node",     label: "フェイズ・メモ" },
         ].map(tb => (
           <button key={tb.key} onClick={() => setPanelTab(tb.key)} style={{
             flex: 1, padding: "10px 0", background: "none", border: "none",
@@ -1755,66 +2313,137 @@ function NodeDetailPanel({ node, parentNode, onUpdate, onClose, onDelete, onAddC
         ))}
       </div>
 
-      {/* 操作モードボタン（盤面タブ時のみ固定表示） */}
       {panelTab === 'board' && (
         <div style={{
           padding: "6px 14px 0", flexShrink: 0,
           background: "#080e1a",
-          display: "flex", alignItems: "center", justifyContent: "space-between",
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6,
         }}>
           <span style={{ fontSize: 10, color: "#4a9eff", letterSpacing: 2, textTransform: "uppercase", fontWeight: 700, fontFamily: "monospace" }}>{t.zone_info || "盤面情報"}</span>
-          <button onClick={() => setMoveTarget(moveTarget ? null : { mode: "move", fromKey: null, card: null })} style={{
-            background: moveTarget ? "#f59e0b22" : "none",
-            border: `1px solid ${moveTarget ? "#f59e0b" : "#2a3a52"}`,
-            color: moveTarget ? "#f59e0b" : "#4a6080",
-            borderRadius: 5, padding: "5px 12px", cursor: "pointer",
-            fontSize: 11, fontFamily: "monospace", fontWeight: 700,
-          }}>{moveTarget ? (t.op_mode_exit || "✕操作モード") : (t.op_mode || "操作モード")}</button>
+          <div style={{ display: "flex", gap: 6 }}>
+            {deleteMode && (
+              <button onClick={() => {
+                if (selectedCards.length === 0) return;
+                const newZones = JSON.parse(JSON.stringify(node.meta.zones || {}));
+                selectedCards.forEach(({ key, card }) => {
+                  newZones[key] = (newZones[key] || []).filter(c => c !== card);
+                });
+                update("meta.zones", newZones);
+                setSelectedCards([]);
+              }} style={{
+                background: selectedCards.length > 0 ? "#ef444422" : "#1a2535",
+                border: `1px solid ${selectedCards.length > 0 ? "#ef4444" : "#2a3a52"}`,
+                color: selectedCards.length > 0 ? "#ef4444" : "#4a5568",
+                borderRadius: 5, padding: "5px 12px", cursor: "pointer",
+                fontSize: 11, fontFamily: "monospace", fontWeight: 700,
+              }}>
+                🗑 {selectedCards.length > 0 ? `${selectedCards.length}枚削除` : "未選択"}
+              </button>
+            )}
+            <button onClick={openBoardView} style={{
+              background: "none",
+              border: "1px solid #2a3a52",
+              color: "#4a6080",
+              borderRadius: 5, padding: "5px 10px", cursor: "pointer",
+              fontSize: 11, fontFamily: "monospace", fontWeight: 700,
+              whiteSpace: "nowrap",
+            }}>🎴 盤面</button>
+            <button onClick={() => {
+              setRestMode(r => !r);
+              setDeleteMode(false);
+              setSelectedCards([]);
+              setMoveTarget({ mode: "move", fromKey: null, card: null });
+            }} style={{
+              background: restMode ? "#f59e0b22" : "none",
+              border: `1px solid ${restMode ? "#f59e0b" : "#2a3a52"}`,
+              color: restMode ? "#f59e0b" : "#4a6080",
+              borderRadius: 5, padding: "5px 10px", cursor: "pointer",
+              fontSize: 11, fontFamily: "monospace", fontWeight: 700,
+              letterSpacing: 2,
+            }}>{restMode ? "✕ ▲▶︎" : "▲ ▶︎"}</button>
+            <button onClick={() => {
+              setDeleteMode(d => !d);
+              setRestMode(false);
+              setSelectedCards([]);
+              setMoveTarget({ mode: "move", fromKey: null, card: null });
+            }} style={{
+              background: deleteMode ? "#ef444422" : "none",
+              border: `1px solid ${deleteMode ? "#ef4444" : "#2a3a52"}`,
+              color: deleteMode ? "#ef4444" : "#4a6080",
+              borderRadius: 5, padding: "5px 12px", cursor: "pointer",
+              fontSize: 11, fontFamily: "monospace", fontWeight: 700,
+            }}>{deleteMode ? "✕選択削除" : "🗑 選択削除"}</button>
+          </div>
         </div>
       )}
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 14, fontFamily: "monospace", touchAction: "pan-y" }}>
+      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 14, fontFamily: "monospace", touchAction: "pan-y", boxSizing: "border-box", width: "100%" }}>
 
-        {/* 盤面タブ */}
         {panelTab === 'board' && <>
 
-        {/* 自動生成ボタン */}
-        {parentNode && (() => {
-          const generated = generateLabel(node, parentNode);
-          return generated ? (
-            <button onClick={guard(() => update("meta.label", generated))} style={{
-              width: "100%", padding: "7px 0", borderRadius: 5, cursor: "pointer",
-              background: "#f59e0b18", border: "1px solid #f59e0b44", color: "#f59e0b",
-              fontSize: 11, fontFamily: "monospace", fontWeight: 700,
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-            }}>
-              <span>✨</span>
-              <span>{generated}</span>
-            </button>
-          ) : null;
-        })()}
+        <ZoneEditor
+            zones={node.meta.zones || {}}
+            onChange={z => update("meta.zones", z)}
+            hiddenZones={node.meta.hiddenZones || []}
+            onToggleHidden={key => {
+              const current = node.meta.hiddenZones || [];
+              const isHidden = current.includes(key);
+              const next = isHidden
+                ? current.filter(k => k !== key)
+                : [...current, key];
+              update("meta.hiddenZones", next);
+              if (isHidden) {
+                const visKeys = settings?.visibleZoneKeys ?? ZONE_KEYS;
+                if (!visKeys.includes(key)) {
+                  updateSettings({ visibleZoneKeys: [...visKeys, key] });
+                }
+              }
+            }}
+            parentZones={parentNode?.meta?.zones}
+            onPropagateUp={(key) => onPropagateUp && onPropagateUp(key, node.meta.zones?.[key] || [])}
+            t={t}
+            settings={{ ...settings, _onUpdateSettings: onUpdateSettings }}
+            moveTarget={moveTarget}
+            setMoveTarget={setMoveTarget}
+            deleteMode={deleteMode}
+            selectedCards={selectedCards}
+            setSelectedCards={setSelectedCards}
+            restMode={restMode}
+            cardStates={node.meta.cardStates || {}}
+            onToggleCardState={(key, card) => {
+              const cs = JSON.parse(JSON.stringify(node.meta.cardStates || {}));
+              const k = `${key}:${card}`;
+              cs[k] = cs[k] === "rest" ? "active" : "rest";
+              update("meta.cardStates", cs);
+            }}
+            onInheritParent={parentNode ? guard(() => {
+              const parentZones = parentNode.meta?.zones;
+              if (!parentZones) return;
+              const next = JSON.parse(JSON.stringify(node));
+              next.meta.zones = JSON.parse(JSON.stringify(parentZones));
+              onUpdate(next);
+            }) : undefined}
+          />
 
         </>
         }
 
-        {/* リソースタブ */}
         {panelTab === 'resource' && <>
 
         <Sec title={t.resource_label}>
-          {/* メモリーゲージ */}
           <Lbl>{t.memory_label}</Lbl>
           <MemoryGauge value={node.state.memory} onChange={v => update("state.memory", v)} t={t} />
           <div style={{ marginTop: 10 }} />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
             {[
-              { label: t.my_sec,                                    path: "state.mySecurity", defKey: "defaultMySecurity", min: 0 },
-              { label: t.opp_sec,                                   path: "state.oppSecurity",defKey: "defaultOppSecurity",min: 0 },
-              { label: t.my_hand_label || t.draw_label || "自ドロー", path: "state.myHand",   defKey: "defaultMyHand",     min: 0 },
-              { label: t.opp_hand_label || "相ドロー",               path: "state.oppHand",  defKey: "defaultOppHand",    min: 0 },
-              { label: t.my_deck_label  || "自山",                   path: "state.myDeck",   defKey: "defaultMyDeck",     min: 0 },
-              { label: t.opp_deck_label || "相山",                   path: "state.oppDeck",  defKey: "defaultOppDeck",    min: 0 },
-              { label: t.my_trash_label  || "自捨札",                path: "state.myTrash",  defKey: "defaultMyTrash",    min: 0 },
-              { label: t.opp_trash_label || "相捨札",                path: "state.oppTrash", defKey: "defaultOppTrash",   min: 0 },
+              { label: t.my_sec,                                     path: "state.mySecurity", min: 0 },
+              { label: t.opp_sec,                                    path: "state.oppSecurity", min: -1 },
+              { label: t.my_hand_label || t.draw_label || "自ドロー", path: "state.myHand",    min: 0 },
+              { label: t.opp_hand_label || "相ドロー",                path: "state.oppHand",   min: 0 },
+              { label: t.my_deck_label  || "自山",                    path: "state.myDeck",    min: 0 },
+              { label: t.opp_deck_label || "相山",                    path: "state.oppDeck",   min: 0 },
+              { label: t.my_trash_label  || "自捨札",                 path: "state.myTrash",   min: 0 },
+              { label: t.opp_trash_label || "相捨札",                 path: "state.oppTrash",  min: 0 },
             ].map(f => {
               const val = Number(node.state[f.path.split(".")[1]] ?? 0);
               return (
@@ -1841,7 +2470,6 @@ function NodeDetailPanel({ node, parentNode, onUpdate, onClose, onDelete, onAddC
               );
             })}
           </div>
-          {/* デフォルトに戻す / 親を引き継ぐ */}
           <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
             <button onClick={() => {
               const s = settings || {};
@@ -1885,49 +2513,25 @@ function NodeDetailPanel({ node, parentNode, onUpdate, onClose, onDelete, onAddC
         </>
         }
 
-        {/* 盤面タブ（続き） */}
-        {panelTab === 'board' && <>
-
-        <ZoneEditor
-            zones={node.meta.zones || {}}
-            onChange={z => update("meta.zones", z)}
-            hiddenZones={node.meta.hiddenZones || []}
-            onToggleHidden={key => {
-              const current = node.meta.hiddenZones || [];
-              const isHidden = current.includes(key);
-              const next = isHidden
-                ? current.filter(k => k !== key)
-                : [...current, key];
-              update("meta.hiddenZones", next);
-              // 「表示中」にした場合、settings.visibleZoneKeysにも追加
-              if (isHidden) {
-                const visKeys = settings?.visibleZoneKeys ?? ZONE_KEYS;
-                if (!visKeys.includes(key)) {
-                  updateSettings({ visibleZoneKeys: [...visKeys, key] });
-                }
-              }
-            }}
-            parentZones={parentNode?.meta?.zones}
-            onPropagateUp={(key) => onPropagateUp && onPropagateUp(key, node.meta.zones?.[key] || [])}
-            t={t}
-            settings={{ ...settings, _onUpdateSettings: onUpdateSettings }}
-            moveTarget={moveTarget}
-            setMoveTarget={setMoveTarget}
-            onInheritParent={parentNode ? guard(() => {
-              const parentZones = parentNode.meta?.zones;
-              if (!parentZones) return;
-              const next = JSON.parse(JSON.stringify(node));
-              next.meta.zones = JSON.parse(JSON.stringify(parentZones));
-              onUpdate(next);
-            }) : undefined}
-          />
-
-
-        </>
-        }
-
-        {/* ノードタブ */}
         {panelTab === 'node' && <>
+
+        <Sec title={t.phase_label || "フェイズ"}>
+          <select
+            value={node.state.phase || "main"}
+            onChange={e => update("state.phase", e.target.value)}
+            style={{
+              width: "100%", background: "#0b1320", border: "1px solid #4a9eff44",
+              borderRadius: 6, padding: "10px 12px", color: "#4a9eff",
+              fontSize: 14, fontFamily: "monospace", fontWeight: 700,
+              outline: "none", boxSizing: "border-box", cursor: "pointer",
+              appearance: "auto",
+            }}
+          >
+            {PHASES.map(ph => (
+              <option key={ph} value={ph}>{getPhaseLabel(t, ph)}</option>
+            ))}
+          </select>
+        </Sec>
 
         <Sec title={t.memo_label}>
           <div style={{ position: "relative" }}>
@@ -1950,7 +2554,6 @@ function NodeDetailPanel({ node, parentNode, onUpdate, onClose, onDelete, onAddC
           </div>
 
         </Sec>
-
 
         <Sec title={t.node_color || "ノードカラー"}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -2022,7 +2625,6 @@ function Sel({ children, ...props }) {
 // ============================================================
 export default function DigiTree() {
   const [tree, setTree] = useState(INITIAL_TREE);
-  // iOS自動ズーム防止
   useEffect(() => {
     const meta = document.querySelector('meta[name="viewport"]');
     const content = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no';
@@ -2037,20 +2639,19 @@ export default function DigiTree() {
   }, []);
 
   const [dbLoaded, setDbLoaded] = useState(false);
-  const [globalShowZones, setGlobalShowZones] = useState(null); // null=各ノード設定, true=全表示, false=全非表示
+  const [globalShowZones, setGlobalShowZones] = useState(null);
   const [saveModal, setSaveModal] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
   const [overwriteConfirm, setOverwriteConfirm] = useState(null);
-  const [deleteConfirm, setDeleteConfirm] = useState(null); // { id, name }
-  const [loadConfirm, setLoadConfirm] = useState(null); // { id, name, tree }
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [loadConfirm, setLoadConfirm] = useState(null);
   const [newTreeConfirm, setNewTreeConfirm] = useState(false);
-  const [insertMode, setInsertMode] = useState(null); // null | { firstId } | 'selecting'
+  const [insertMode, setInsertMode] = useState(null);
   const [saveListOpen, setSaveListOpen] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState('display');
 
-  // グローバル設定
   const DEFAULT_SETTINGS = {
     defaultNodeColor: null,
     defaultMemory: 1,
@@ -2083,24 +2684,20 @@ export default function DigiTree() {
     });
   };
   const [saveName, setSaveName] = useState("");
-  const [savedTrees, setSavedTrees] = useState([]); // {id, name, tree, savedAt}[]
+  const [savedTrees, setSavedTrees] = useState([]);
 
-  // 保存済みツリー一覧をIDB→localStorageの順で読み込む
   useEffect(() => {
     idbGet('digitree_saved_trees').then(saved => {
       if (Array.isArray(saved) && saved.length > 0) {
         setSavedTrees(saved);
-        // IDBから読めたらlocalStorageにもバックアップ
         idbSet('digitree_saved_trees_bak', saved).catch(() => {});
       } else {
-        // IDBにない場合はlocalStorageのバックアップを使う
         try {
           const bak = localStorage.getItem('digitree_saved_trees_bak');
           if (bak) {
             const parsed = JSON.parse(bak);
             if (Array.isArray(parsed) && parsed.length > 0) {
               setSavedTrees(parsed);
-              // 復元したデータをIDBにも書き戻す
               idbSet('digitree_saved_trees', parsed).catch(() => {});
             }
           }
@@ -2113,16 +2710,13 @@ export default function DigiTree() {
     });
   }, []);
 
-  // IndexedDB からデータを読み込む（起動時）
   useEffect(() => {
     idbGet('digitree_tree').then(saved => {
       if (saved && saved.nodes && saved.rootNodeId) {
         setTree(saved);
         idbSet('digitree_tree_bak', saved).catch(() => {});
       } else {
-        // IDB→localStorageバックアップ→通常localStorageの順で試みる
         const sources = ['digitree_tree_bak', 'digitree_tree'];
-        let restored = false;
         for (const key of sources) {
           try {
             const ls = localStorage.getItem(key);
@@ -2131,7 +2725,6 @@ export default function DigiTree() {
               if (parsed && parsed.nodes && parsed.rootNodeId) {
                 setTree(parsed);
                 idbSet('digitree_tree', parsed).catch(() => {});
-                restored = true;
                 break;
               }
             }
@@ -2156,14 +2749,10 @@ export default function DigiTree() {
   const [selectedId, setSelectedId] = useState(null);
   const blockActionsRef = useRef(false);
   const blockTimerRef = useRef(null);
-  const historyRef = useRef([]); // アンドゥ用スタック（最大30件）
+  const historyRef = useRef([]);
 
-  // 選択変更時に一定時間ボタン操作をブロック
-
-  // アンドゥ対応のsetTree
   const setTreeWithHistory = useCallback((updater) => {
     setTree(prev => {
-      // 現在の状態をスタックに積む
       historyRef.current = [...historyRef.current.slice(-29), prev];
       const next = typeof updater === 'function' ? updater(prev) : updater;
       return next;
@@ -2178,7 +2767,6 @@ export default function DigiTree() {
     setSelectedId(null);
   }, []);
 
-  // 全ノードのshowZonesを一括変更
   const applyGlobalShowZones = useCallback((show) => {
     setGlobalShowZones(show);
     setTreeWithHistory(prev => {
@@ -2195,6 +2783,8 @@ export default function DigiTree() {
     });
   }, []);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [boardView, setBoardView] = useState(false);
+  const [boardViewNodeId, setBoardViewNodeId] = useState(null);
   const [draggingId, setDraggingId] = useState(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
@@ -2214,7 +2804,6 @@ export default function DigiTree() {
     });
   }, []);
 
-  // 自動保存
   useEffect(() => {
     if (!dbLoaded) return;
     const data = tree;
@@ -2248,8 +2837,6 @@ export default function DigiTree() {
     return m;
   }, [nodes]);
 
-  // ---- 操作 ----
-  // 指定ノードの子孫全体の最大Y座標を返す
   const getSubtreeMaxY = useCallback((nodeId, nodesMap) => {
     let maxY = nodesMap[nodeId]?.position.y ?? 0;
     const stack = [...(nodesMap[nodeId]?.children ?? [])];
@@ -2263,10 +2850,8 @@ export default function DigiTree() {
     return maxY;
   }, []);
 
-  // 指定X座標付近で使われていないY座標を返す
-  // ノードの推定高さを計算（表示中ゾーン数に応じて）
   const estimateNodeHeight = useCallback((node) => {
-    const baseH = 160; // ヘッダー+メモリー+リソース
+    const baseH = 160;
     if (node.meta?.showZones === false) return baseH;
     const zoneCount = Object.values(node.meta?.zones || {}).filter(arr => arr.length > 0).length;
     const hiddenCount = (node.meta?.hiddenZones || []).length;
@@ -2289,14 +2874,11 @@ export default function DigiTree() {
     return y;
   }, [estimateNodeHeight]);
 
-
-  // 2ノード間に割り込みノードを挿入
   const insertBetween = useCallback((parentId, childId) => {
     const parent = nodes[parentId];
     const child = nodes[childId];
     if (!parent || !child) return;
 
-    // childId以降の全子孫turnを+1
     const descendants = [];
     const stack = [childId];
     while (stack.length) {
@@ -2310,7 +2892,6 @@ export default function DigiTree() {
     setTreeWithHistory(prev => {
       const ns = JSON.parse(JSON.stringify(prev.nodes));
 
-      // 子孫turnを+1・X座標を+TURN_GAP
       descendants.forEach(id => {
         if (ns[id]) {
           ns[id].state.turn += 1;
@@ -2318,7 +2899,6 @@ export default function DigiTree() {
         }
       });
 
-      // 新ノード：親の情報を引き継ぎ
       const newNode = {
         ...JSON.parse(JSON.stringify(ns[parentId])),
         id: uid(),
@@ -2333,10 +2913,7 @@ export default function DigiTree() {
         },
       };
 
-      // childの親をnewNodeに変更
       ns[childId].parentId = newNode.id;
-
-      // parentの子のchildIdをnewNode.idに置き換え
       ns[parentId].children = ns[parentId].children.map(id => id === childId ? newNode.id : id);
       ns[newNode.id] = newNode;
 
@@ -2374,7 +2951,6 @@ export default function DigiTree() {
     if (!parent) return;
     const turn = parent.state.turn + turnIncrement;
 
-    // 親の子孫最大Yを起点に、全ノードと重ならない位置を探す
     const baseY = parent.children.length === 0
       ? parent.position.y
       : getSubtreeMaxY(parentId, nodes) + BRANCH_GAP;
@@ -2382,17 +2958,13 @@ export default function DigiTree() {
     const targetX = (turn - 1) * TURN_GAP + 40;
     const offsetY = findFreeY(targetX, baseY, nodes);
     const n = makeNode(parentId, turn, offsetY, { type: "play", description: "" });
-    // 親の全stateを引き継ぎ（turnのみ更新）
-    n.state = { ...parent.state, turn }; // 親引き継ぎ（設定のデフォルト値は新規ルートノード作成時のみ使用）
-    // 親のメタ情報を引き継ぎ（ラベル・タグ・メモ）
+    n.state = { ...parent.state, turn };
     n.meta = {
       ...parent.meta,
       label: turnIncrement === 0 ? parent.meta.label : t.canvas_axis(turn),
       isCollapsed: false,
-      // カラーは親がnull（デフォルト）なら設定のデフォルトカラーを使う、親に色があれば引き継ぐ
       color: parent.meta.color ?? (settings?.defaultNodeColor ?? null),
     };
-    // 親の行動情報をベースに引き継ぎ（説明はリセット）
     n.action = { ...parent.action, description: "" };
     setTreeWithHistory(prev => ({
       ...prev,
@@ -2404,27 +2976,24 @@ export default function DigiTree() {
     }));
     setSelectedId(n.id);
   }, [nodes, turnIncrement, getSubtreeMaxY, findFreeY, settings, estimateNodeHeight, t]);
-  // ノードを自動整列（縦横両方）
+
   const autoLayout = useCallback(() => {
     const nodesCopy = JSON.parse(JSON.stringify(nodes));
     const root = tree.rootNodeId;
     if (!nodesCopy[root]) return;
 
-    const PAD = 24; // ノード間の余白
+    const PAD = 24;
 
-    // DOMから実際の高さを取得（ズーム補正あり）
     const getH = (nodeId) => {
       const el = document.querySelector(`[data-nodeid="${nodeId}"]`);
       if (el) {
         const rect = el.getBoundingClientRect();
-        // ズームで拡縮されているので実際のcanvas上の高さに戻す
         const zoom = viewport.zoom || 1;
         return Math.ceil(rect.height / zoom);
       }
       return estimateNodeHeight(nodesCopy[nodeId]);
     };
 
-    // 1パス目: 深さでX確定
     const setDepth = (nodeId, depth) => {
       const n = nodesCopy[nodeId];
       if (!n) return;
@@ -2433,8 +3002,7 @@ export default function DigiTree() {
     };
     setDepth(root, 0);
 
-    // 全配置済みノードのY範囲を管理して完全衝突防止
-    const placed = []; // { x, y, h }
+    const placed = [];
 
     const findY = (x, preferY, h) => {
       let y = preferY;
@@ -2453,7 +3021,6 @@ export default function DigiTree() {
       return y;
     };
 
-    // 2パス目: DFSでY確定
     const calcY = (nodeId, preferY) => {
       const n = nodesCopy[nodeId];
       if (!n) return preferY;
@@ -2472,7 +3039,6 @@ export default function DigiTree() {
     historyRef.current = [...historyRef.current.slice(-29), tree];
     setTree(t => ({ ...t, nodes: nodesCopy }));
   }, [nodes, tree, setTree, estimateNodeHeight, viewport.zoom]);
-
 
   const deleteNode = useCallback((nodeId) => {
     const node = nodes[nodeId];
@@ -2498,7 +3064,6 @@ export default function DigiTree() {
     setTreeWithHistory(prev => ({ ...prev, nodes: { ...prev.nodes, [updated.id]: updated } }));
   }, [setTreeWithHistory]);
 
-  // 指定エリアのカードを1番上流まで全祖先に伝播
   const propagateUp = useCallback((nodeId, zoneKey, cards) => {
     setTreeWithHistory(prev => {
       const ns = JSON.parse(JSON.stringify(prev.nodes));
@@ -2523,7 +3088,6 @@ export default function DigiTree() {
     setTreeWithHistory(prev => ({ ...prev, nodes: { ...prev.nodes, [nodeId]: { ...prev.nodes[nodeId], meta: { ...prev.nodes[nodeId].meta, isCollapsed: !prev.nodes[nodeId].meta.isCollapsed } } } }));
   }, [nodes, updateNode]);
 
-  // ---- ドラッグ ----
   const handleMouseDown = useCallback((e) => {
     if (e.button !== 0) return;
     const target = e.target.closest("[data-nodeid]");
@@ -2544,7 +3108,6 @@ export default function DigiTree() {
   }, [nodes, viewport]);
 
   const handleTouchStart = useCallback((e) => {
-    // ボタン等のインタラクティブ要素へのタッチはブラウザに委ねる
     const tag = e.target.tagName;
     if (tag === "BUTTON" || tag === "SELECT" || tag === "INPUT" || tag === "TEXTAREA") return;
 
@@ -2590,13 +3153,11 @@ export default function DigiTree() {
   const handleTouchMove = useCallback((e) => {
     e.preventDefault();
     if (e.touches.length === 2 && pinchRef.current) {
-      // ピンチズーム処理
       const t0 = e.touches[0], t1 = e.touches[1];
       const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
       const p = pinchRef.current;
       const scale = dist / p.dist;
       const newZoom = Math.min(2, Math.max(0.25, p.zoom * scale));
-      // ピンチ中心を基準にパン補正
       const newX = p.cx / newZoom - p.cx / p.zoom + p.vx;
       const newY = p.cy / newZoom - p.cy / p.zoom + p.vy;
       setViewport({ zoom: newZoom, x: newX, y: newY });
@@ -2621,19 +3182,131 @@ export default function DigiTree() {
     setViewport(v => ({ ...v, zoom: Math.min(2, Math.max(0.25, v.zoom * delta)) }));
   }, []);
 
-  // ---- キーボード ----
   useEffect(() => {
     const h = (e) => {
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
       if (e.key === "Escape") { setSelectedId(null); setPanelOpen(false); }
       if (e.key === "Delete" && selectedId) deleteNode(selectedId);
       if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); undo(); }
-      if ((e.ctrlKey || e.metaKey) && e.key === "d" && selectedId) { e.preventDefault(); /* duplicate removed */ }
       if (e.key === "Enter" && selectedId) addChild(selectedId);
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [selectedId, deleteNode, addChild, undo]);
+
+  // ============================================================
+  // HTML出力
+  // ============================================================
+  const [htmlExportMode, setHtmlExportMode] = useState(null); // null | 'start' | 'end'
+  const [htmlExportStart, setHtmlExportStart] = useState(null);
+
+  const isDescendantOf = useCallback((nodeId, ancestorId) => {
+    let cur = nodes[nodeId]?.parentId;
+    while (cur) {
+      if (cur === ancestorId) return true;
+      cur = nodes[cur]?.parentId;
+    }
+    return false;
+  }, [nodes]);
+
+  const getRouteBetween = useCallback((startId, endId) => {
+    const route = [];
+    let cur = endId;
+    while (cur) {
+      route.unshift(cur);
+      if (cur === startId) break;
+      cur = nodes[cur]?.parentId;
+    }
+    return route[0] === startId ? route : null;
+  }, [nodes]);
+
+  const generateHTML = useCallback((route) => {
+    const phaseLabels = { turn_start:"ターン開始時", active:"アクティブフェイズ", draw:"ドローフェイズ", breeding:"育成フェイズ", main:"メインフェイズ", turn_end:"ターン終了時" };
+    const zoneLabels = { hand:"手札", breeding:"育成エリア", main:"バトルエリア", trash:"トラッシュ", deck:"山札", security:"セキュリティ" };
+    const zoneColors = { hand:"#22c55e", breeding:"#4a9eff", main:"#f59e0b", trash:"#94a3b8", deck:"#a855f7", security:"#ef4444" };
+
+    const cardsHTML = route.map((id, idx) => {
+      const nd = nodes[id];
+      const parent = idx > 0 ? nodes[route[idx - 1]] : null;
+      const mem = nd.state.memory ?? 0;
+      const phase = phaseLabels[nd.state.phase || "main"] || "メインフェイズ";
+      const isWin = (nd.state.oppSecurity ?? 0) < 0;
+      const label = nd.meta.label === "INITIAL_BOARD_PLACEHOLDER" ? "開始盤面" : nd.meta.label;
+      const cs = nd.meta.cardStates || {};
+
+      const zonesH = Object.entries(zoneLabels).map(([key, zlabel]) => {
+        const cards = nd.meta.zones?.[key] || [];
+        const color = zoneColors[key];
+        const inner = cards.length === 0
+          ? `<span style="color:#555;font-style:italic">なし</span>`
+          : cards.map(card => {
+              const isRest = cs[`${key}:${card}`] === "rest";
+              const isNew = !(parent?.meta?.zones?.[key] || []).includes(card);
+              return `<span style="background:${color}22;border:1px solid ${color}66;border-radius:4px;padding:2px 6px;font-size:11px;color:${color};font-weight:${isNew?700:400};margin:2px;display:inline-block">${isRest?"▶︎":"▲"} ${card}${isNew?" ★":""}</span>`;
+            }).join("");
+        return `<div style="margin-bottom:6px"><div style="font-size:10px;color:${color};font-weight:700;margin-bottom:3px">${zlabel}</div><div>${inner}</div></div>`;
+      }).join("");
+
+      const memColor = mem > 0 ? "#4a9eff" : mem < 0 ? "#ef4444" : "#94a3b8";
+      const resH = [
+        { label:"自SEC", val:nd.state.mySecurity??0, color:"#4a9eff" },
+        { label:"相SEC", val:nd.state.oppSecurity??0, color:"#ef4444" },
+        { label:"自ドロー", val:nd.state.myHand??0, color:"#22c55e" },
+      ].map(r => `<span style="background:#111;border:1px solid ${r.color}44;border-radius:5px;padding:4px 10px;margin:2px;display:inline-block;text-align:center"><div style="font-size:9px;color:${r.color}">${r.label}</div><div style="font-size:18px;font-weight:900;color:${r.color}">${r.val}</div></span>`).join("");
+
+      const connector = idx < route.length - 1 ? `<div style="text-align:center;color:#243040;font-size:20px;margin:4px 0">↓</div>` : "";
+
+      return `<div style="background:#0f172a;border:1px solid #243040;border-radius:10px;padding:12px 14px">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+    <span style="background:#4a9eff22;color:#4a9eff;border:1px solid #4a9eff55;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700">${idx+1}手目</span>
+    <span style="font-size:10px;color:#94a3b8">${phase}</span>
+    ${isWin ? '<span style="color:#22c55e;font-weight:900;font-size:14px;text-shadow:0 0 10px #22c55e">【勝ち】</span>' : ""}
+  </div>
+  <div style="font-size:16px;font-weight:700;color:#dde4f0;margin-bottom:8px;border-bottom:1px solid #243040;padding-bottom:6px">${label}</div>
+  <div style="margin-bottom:8px"><span style="font-size:10px;color:#4a9eff;font-weight:700">MEMORY</span> <span style="font-size:20px;font-weight:900;color:${memColor}">${mem>0?"+"+mem:mem}</span></div>
+  <div style="margin-bottom:10px">${resH}</div>
+  <div style="margin-bottom:8px">${zonesH}</div>
+  ${nd.meta.note ? `<div style="background:#090f1e;border-left:2px solid #243040;padding:5px 8px;font-size:11px;color:#7a90a8;border-radius:3px">📝 ${nd.meta.note}</div>` : ""}
+</div>${connector}`;
+    }).join("\n");
+
+    return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${tree.title} - DigiTree</title>
+</head>
+<body style="background:#060c18;color:#dde4f0;font-family:monospace;padding:16px;margin:0">
+<h1 style="font-size:18px;color:#4a9eff;text-align:center;margin-bottom:24px">🌳 ${tree.title}</h1>
+<div style="display:flex;flex-direction:column;gap:12px;max-width:480px;margin:0 auto">
+${cardsHTML}
+</div>
+</body>
+</html>`;
+  }, [nodes, tree.title]);
+
+  const handleHtmlExportSelect = useCallback((id) => {
+    if (htmlExportMode === 'start') {
+      setHtmlExportStart(id);
+      setHtmlExportMode('end');
+    } else if (htmlExportMode === 'end') {
+      if (id !== htmlExportStart && !isDescendantOf(id, htmlExportStart)) return;
+      const route = getRouteBetween(htmlExportStart, id);
+      if (!route) return;
+      const html = generateHTML(route);
+      const blob = new Blob([html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${tree.title}_route.html`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+      setHtmlExportMode(null);
+      setHtmlExportStart(null);
+    }
+  }, [htmlExportMode, htmlExportStart, isDescendantOf, getRouteBetween, generateHTML, tree.title]);
 
   const canvasSize = useMemo(() => {
     const vals = Object.values(nodes);
@@ -2645,7 +3318,6 @@ export default function DigiTree() {
 
   const nodeCount = Object.keys(nodes).length;
 
-  // タッチイベントをnon-passiveで登録（preventDefault有効化）
   useEffect(() => {
     const el = canvasRef.current;
     if (!el) return;
@@ -2659,7 +3331,6 @@ export default function DigiTree() {
     };
   }, [handleTouchStart, handleTouchMove, handleEnd]);
 
-  // ---- モバイルFAB追加ボタン ----
   const handleCanvasTap = useCallback((e) => {
     if (e.target === canvasRef.current || e.target.dataset?.canvasbg) {
       setSelectedId(null);
@@ -2675,11 +3346,9 @@ export default function DigiTree() {
     }}>
       {/* ===== HEADER ===== */}
       <div style={{ background: "#080e1a", borderBottom: "1px solid #1a2535", flexShrink: 0 }}>
-        {/* 上段: ロゴ・統計・主要ボタン */}
         <div style={{
           height: 44, display: "flex", alignItems: "center", padding: "0 10px", gap: 8, minWidth: 0,
         }}>
-          {/* ロゴ */}
           <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
             <div style={{
               width: 20, height: 20, background: "linear-gradient(135deg,#4a9eff,#22c55e)",
@@ -2693,7 +3362,6 @@ export default function DigiTree() {
             )}
           </div>
 
-          {/* ツリー名（タップで編集） */}
           <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
             {editingTitle ? (
               <input
@@ -2723,20 +3391,17 @@ export default function DigiTree() {
             )}
           </div>
 
-          {/* 統計 */}
           <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
             <Stat label={t.node_count_label || "N"} value={nodeCount} />
             <Stat label={t.stat_move} value={t.move_suffix(maxTurn)} />
           </div>
 
-          {/* 新規作成 */}
           <button onClick={() => setNewTreeConfirm(true)} style={{
             background: "#0f1a28", border: "1px solid #22c55e44", color: "#22c55e",
             width: 38, height: 38, borderRadius: 6, cursor: "pointer",
             fontSize: 12, fontFamily: "monospace", fontWeight: 700, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
           }} title={t.new_tree || "新規作成"}>{t.new_tree_short || "新規"}</button>
 
-          {/* セーブリスト */}
           <button onClick={() => setSaveListOpen(true)} style={{
             background: saveListOpen ? "#1a2535" : "#0f1a28",
             border: `1px solid ${savedTrees.length > 0 ? "#22c55e55" : "#1a2535"}`,
@@ -2756,7 +3421,6 @@ export default function DigiTree() {
             )}
           </button>
 
-          {/* アンドゥ */}
           <button onClick={undo} disabled={historyRef.current.length === 0} style={{
             background: "#0f1a28", border: "1px solid #1a2535",
             color: historyRef.current.length === 0 ? "#2a3a52" : "#7a90a8",
@@ -2765,14 +3429,12 @@ export default function DigiTree() {
             fontSize: 22, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
           }}>↩</button>
 
-          {/* キャンバスリセット */}
           <button onClick={() => setViewport({ x: 0, y: 0, zoom: 1 })} style={{
             background: "#0f1a28", border: "1px solid #1a2535", color: "#4a6080",
             width: 44, height: 44, borderRadius: 8, cursor: "pointer",
             fontSize: 22, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
           }}>⌂</button>
 
-          {/* 設定 */}
           <button onClick={() => setSettingsOpen(true)} style={{
             background: settingsOpen ? "#1a2535" : "#0f1a28",
             border: `1px solid ${settingsOpen ? "#4a9eff" : "#1a2535"}`,
@@ -2784,10 +3446,55 @@ export default function DigiTree() {
         </div>
       </div>
 
+      {/* サブバー */}
+      <div style={{
+        background: "#080e1a", borderBottom: "1px solid #1a2535",
+        padding: "4px 10px", flexShrink: 0, display: "flex", alignItems: "center",
+        justifyContent: "space-between", gap: 6,
+      }}>
+        {/* HTML出力ボタン / 出力モード表示 */}
+        {htmlExportMode ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1 }}>
+            <span style={{ fontSize: 11, color: "#f59e0b", fontFamily: "monospace", fontWeight: 700 }}>
+              {htmlExportMode === 'start' ? '📤 開始ノードをタップ' : `📤 終了ノードをタップ（開始：${getNodeLabel(nodes[htmlExportStart]?.meta?.label, t)}）`}
+            </span>
+            <button onClick={() => { setHtmlExportMode(null); setHtmlExportStart(null); }} style={{
+              background: "none", border: "1px solid #2a3a52", color: "#7a90a8",
+              borderRadius: 5, padding: "3px 8px", cursor: "pointer",
+              fontSize: 11, fontFamily: "monospace",
+            }}>✕</button>
+          </div>
+        ) : (
+          <button onClick={() => { setHtmlExportMode('start'); setSelectedId(null); }} style={{
+            background: "#0f1a28", border: "1px solid #94a3b855",
+            color: "#94a3b8", height: 30, borderRadius: 6, cursor: "pointer",
+            fontSize: 11, fontFamily: "monospace", fontWeight: 700,
+            padding: "0 12px",
+          }}>📤 HTML出力</button>
+        )}
+
+        {/* 盤面ビューボタン */}
+        <button
+          onClick={() => { if (selectedId) { setBoardViewNodeId(selectedId); setBoardView(true); } }}
+          disabled={!selectedId}
+          style={{
+            background: selectedId ? "#0f1a28" : "none",
+            border: `1px solid ${selectedId ? "#f59e0b55" : "#1a2535"}`,
+            color: selectedId ? "#f59e0b" : "#2a3a52",
+            height: 30, borderRadius: 6,
+            cursor: selectedId ? "pointer" : "default",
+            fontSize: 11, fontFamily: "monospace", fontWeight: 700,
+            padding: "0 12px", display: "flex", alignItems: "center", gap: 5,
+            flexShrink: 0,
+          }}
+        >
+          🎴 {selectedId ? `「${getNodeLabel(nodes[selectedId]?.meta?.label, t)}」の盤面` : "盤面"}
+        </button>
+      </div>
+
       {/* ===== BODY ===== */}
       <div style={{ flex: 1, display: "flex", overflow: "hidden", position: "relative" }}>
 
-        {/* CANVAS */}
         <div
           ref={canvasRef}
           style={{
@@ -2803,7 +3510,6 @@ export default function DigiTree() {
           onWheel={handleWheel}
           onClick={handleCanvasTap}
         >
-          {/* グリッド */}
           <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}>
             <defs>
               <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"
@@ -2814,7 +3520,6 @@ export default function DigiTree() {
             <rect width="100%" height="100%" fill="url(#grid)" />
           </svg>
 
-          {/* ターン軸ラベル */}
           <div style={{
             position: "absolute", inset: 0, pointerEvents: "none",
             transform: `translate(${viewport.x * viewport.zoom}px, ${viewport.y * viewport.zoom}px) scale(${viewport.zoom})`,
@@ -2832,7 +3537,6 @@ export default function DigiTree() {
             ))}
           </div>
 
-          {/* メインレイヤー */}
           <div style={{
             position: "absolute", top: 0, left: 0,
             transform: `translate(${viewport.x * viewport.zoom}px, ${viewport.y * viewport.zoom}px) scale(${viewport.zoom})`,
@@ -2849,25 +3553,31 @@ export default function DigiTree() {
                   parentNode={node.parentId ? nodes[node.parentId] : null}
                   settings={settings}
                   isSelected={selectedId === id}
-                  onSelect={selectNode}
+                  onSelect={(id) => {
+                    if (htmlExportMode) { handleHtmlExportSelect(id); return; }
+                    selectNode(id);
+                  }}
                   onAddChild={addChild}
                   onDelete={deleteNode}
                   onToggleCollapse={toggleCollapse}
                   isDragging={draggingId === id}
                   t={t}
-                  blockActions={() => blockActionsRef.current}
-                  onOpenPanel={() => { setPanelOpen(true); }}
+                  blockActions={() => htmlExportMode ? false : blockActionsRef.current}
+                  onOpenPanel={() => { if (!htmlExportMode) setPanelOpen(true); }}
                   onBlockStart={() => {
+                    if (htmlExportMode) return;
                     blockActionsRef.current = true;
                     if (blockTimerRef.current) clearTimeout(blockTimerRef.current);
                     blockTimerRef.current = setTimeout(() => { blockActionsRef.current = false; }, 400);
                   }}
+                  htmlExportMode={htmlExportMode}
+                  htmlExportStart={htmlExportStart}
+                  isDescendantOf={isDescendantOf}
                 />
               );
             })}
           </div>
 
-          {/* 割込モードガイド */}
           {insertMode && (
             <div style={{
               position: "absolute", top: 36, left: "50%",
@@ -2888,7 +3598,6 @@ export default function DigiTree() {
             </div>
           )}
 
-          {/* 右下ボタン群（整列・ズーム） */}
           <div style={{
             position: "fixed",
             bottom: 16, right: 12,
@@ -2915,7 +3624,6 @@ export default function DigiTree() {
           </div>
         </div>
 
-        {/* DETAIL PANEL — PC: サイドバー、モバイル: ボトムシート */}
         {!isMobile && (
           <NodeDetailPanel
             node={selectedNode}
@@ -2932,11 +3640,17 @@ export default function DigiTree() {
             setTurnIncrement={setTurnIncrement}
             t={t}
             blockActions={() => blockActionsRef.current}
+            nodes={nodes}
+            onSelectNode={(id) => setSelectedId(id)}
+            boardView={boardView}
+            setBoardView={setBoardView}
+            boardViewNodeId={boardViewNodeId}
+            setBoardViewNodeId={setBoardViewNodeId}
+            onUndo={undo}
           />
         )}
       </div>
 
-      {/* モバイルボトムシート */}
       {isMobile && panelOpen && selectedNode && (
         <NodeDetailPanel
           node={selectedNode}
@@ -2953,11 +3667,30 @@ export default function DigiTree() {
           setTurnIncrement={setTurnIncrement}
           t={t}
           blockActions={() => blockActionsRef.current}
+          nodes={nodes}
+          onSelectNode={(id) => { setSelectedId(id); }}
+          boardView={boardView}
+          setBoardView={setBoardView}
+          boardViewNodeId={boardViewNodeId}
+          setBoardViewNodeId={setBoardViewNodeId}
+          onUndo={undo}
         />
       )}
 
+      {/* 盤面ビューモーダル（メインApp） */}
+      {boardView && (
+        <BoardViewModal
+          boardViewNodeId={boardViewNodeId}
+          setBoardViewNodeId={setBoardViewNodeId}
+          setBoardView={setBoardView}
+          nodes={nodes}
+          selectedNode={selectedNode}
+          t={t}
+          onUpdateNode={updateNode}
+        />
+      )}
 
-      {/* ===== 設定モーダル ===== */}
+      {/* 設定モーダル */}
       {settingsOpen && (
         <div style={{
           position: "fixed", inset: 0, background: "#000b", zIndex: 400,
@@ -2969,7 +3702,6 @@ export default function DigiTree() {
             display: "flex", flexDirection: "column",
             fontFamily: "monospace", boxShadow: "0 8px 48px #000e",
           }}>
-            {/* ヘッダー */}
             <div style={{
               padding: "14px 18px 10px", borderBottom: "1px solid #1a2535",
               display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -2982,8 +3714,6 @@ export default function DigiTree() {
             </div>
 
             <div style={{ overflowY: "auto", touchAction: "pan-y", display: "flex", flexDirection: "column" }}>
-
-              {/* タブ切替 */}
               {(() => {
                 const tab = settingsTab;
                 const setTab = setSettingsTab;
@@ -2995,7 +3725,6 @@ export default function DigiTree() {
                 ];
                 return (
                   <>
-                    {/* タブバー */}
                     <div style={{ display: "flex", borderBottom: "1px solid #1a2535", flexShrink: 0 }}>
                       {tabs.map(tb => (
                         <button key={tb.key} onClick={() => setTab(tb.key)} style={{
@@ -3009,9 +3738,7 @@ export default function DigiTree() {
 
                     <div style={{ padding: "14px 18px", display: "flex", flexDirection: "column", gap: 14 }}>
 
-                      {/* 表示タブ */}
                       {tab === "display" && (<>
-                        {/* リソース設定 */}
                         <SettingSec title={t.default_resource}>
                           <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
                             {[
@@ -3088,10 +3815,8 @@ export default function DigiTree() {
                             fontSize: 11, fontFamily: "monospace",
                           }}>{t.reset_defaults || "↩ 初期設定に戻す"}</button>
                         </SettingSec>
-
                       </>)}
 
-                      {/* 盤面タブ */}
                       {tab === "board" && (<>
                         <SettingSec title={t.zone_display}>
                           {(() => {
@@ -3181,7 +3906,6 @@ export default function DigiTree() {
                         </SettingSec>
                       </>)}
 
-                      {/* データタブ */}
                       {tab === "data" && (<>
                         <SettingSec title={t.data_mgmt}>
                           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -3238,7 +3962,6 @@ export default function DigiTree() {
                         </SettingSec>
                       </>)}
 
-                      {/* 外観タブ */}
                       {tab === "appearance" && (<>
                         <SettingSec title={t.lang_label}>
                           <select value={lang} onChange={e => changeLang(e.target.value)} style={{
@@ -3337,19 +4060,16 @@ export default function DigiTree() {
                         {new Date(entry.savedAt).toLocaleString('ja')} ・ {Object.keys(entry.tree.nodes || {}).length}ノード
                       </div>
                     </div>
-                    {/* 読込 */}
                     <button onClick={() => setLoadConfirm({ id: entry.id, name: entry.name, tree: entry.tree })} style={{
                       background: "#22c55e22", border: "1px solid #22c55e55", color: "#22c55e",
                       borderRadius: 4, padding: "4px 8px", cursor: "pointer",
                       fontSize: 11, fontFamily: "monospace", fontWeight: 700, flexShrink: 0,
                     }}>読込</button>
-                    {/* 上書き */}
                     <button onClick={() => setOverwriteConfirm({ id: entry.id, name: entry.name })} style={{
                       background: "#4a9eff22", border: "1px solid #4a9eff55", color: "#4a9eff",
                       borderRadius: 4, padding: "4px 8px", cursor: "pointer",
                       fontSize: 11, fontFamily: "monospace", fontWeight: 700, flexShrink: 0,
                     }}>上書き</button>
-                    {/* 削除 */}
                     <button onClick={() => setDeleteConfirm({ id: entry.id, name: entry.name })} style={{
                       background: "#ef444418", border: "1px solid #ef444444", color: "#ef4444",
                       borderRadius: 4, padding: "4px 8px", cursor: "pointer",
@@ -3369,7 +4089,6 @@ export default function DigiTree() {
         </div>
       )}
 
-      {/* 名前をつけて保存モーダル */}
       {saveModal && (
         <div style={{
           position: "fixed", inset: 0, background: "#000b", zIndex: 300,
@@ -3402,41 +4121,6 @@ export default function DigiTree() {
                 fontFamily: "monospace", outline: "none",
               }}
             />
-            {savedTrees.length > 0 && (
-              <div style={{ maxHeight: 180, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
-                <div style={{ fontSize: 9, color: "#2a3a52", letterSpacing: 1, marginBottom: 2 }}>保存済み一覧（タップで読み込み）</div>
-                {savedTrees.map(entry => (
-                  <div key={entry.id} style={{
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    background: "#0b1320", border: "1px solid #1a2535", borderRadius: 5,
-                    padding: "5px 10px",
-                  }}>
-                    <button onClick={() => {
-                      historyRef.current = [...historyRef.current.slice(-29), tree];
-                      setTree(entry.tree);
-                      setSaveModal(false);
-                    }} style={{
-                      background: "none", border: "none", color: "#7a90a8",
-                      cursor: "pointer", fontSize: 11, fontFamily: "monospace",
-                      textAlign: "left", flex: 1,
-                    }}>
-                      <span style={{ color: "#dde4f0" }}>{entry.name}</span>
-                      <span style={{ color: "#2a3a52", marginLeft: 8, fontSize: 9 }}>
-                        {new Date(entry.savedAt).toLocaleDateString('ja')}
-                      </span>
-                    </button>
-                    <button onClick={() => {
-                      const next = savedTrees.filter(e => e.id !== entry.id);
-                      setSavedTrees(next);
-                      idbSet('digitree_saved_trees', next).catch(() => {});
-                    }} style={{
-                      background: "none", border: "none", color: "#2a3a52",
-                      cursor: "pointer", fontSize: 12, padding: "0 4px",
-                    }}>×</button>
-                  </div>
-                ))}
-              </div>
-            )}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button onClick={() => setSaveModal(false)} style={{
                 padding: "6px 14px", borderRadius: 5, cursor: "pointer",
@@ -3448,7 +4132,7 @@ export default function DigiTree() {
                 const next = [entry, ...savedTrees].slice(0, 20);
                 setSavedTrees(next);
                 idbSet('digitree_saved_trees', next).catch(() => {});
-      idbSet('digitree_saved_trees_bak', next).catch(() => {});
+                idbSet('digitree_saved_trees_bak', next).catch(() => {});
                 setSaveModal(false);
               }} style={{
                 padding: "6px 14px", borderRadius: 5, cursor: "pointer",
@@ -3460,7 +4144,6 @@ export default function DigiTree() {
         </div>
       )}
 
-      {/* 全データ消去確認モーダル */}
       {newTreeConfirm && (
         <div style={{
           position: "fixed", inset: 0, background: "#000b", zIndex: 300,
@@ -3472,12 +4155,8 @@ export default function DigiTree() {
             fontFamily: "monospace", boxShadow: "0 8px 40px #000c",
             display: "flex", flexDirection: "column", gap: 12,
           }}>
-            <div style={{ fontSize: 15, color: "#dde4f0", fontWeight: 700 }}>
-              {t.new_tree || "新規作成"}
-            </div>
-            <div style={{ fontSize: 12, color: "#7a90a8", lineHeight: 1.6 }}>
-              {t.new_tree_confirm || "現在のツリーを破棄して新規作成しますか？"}
-            </div>
+            <div style={{ fontSize: 15, color: "#dde4f0", fontWeight: 700 }}>{t.new_tree || "新規作成"}</div>
+            <div style={{ fontSize: 12, color: "#7a90a8", lineHeight: 1.6 }}>{t.new_tree_confirm || "現在のツリーを破棄して新規作成しますか？"}</div>
             <button onClick={() => {
               const entry = { id: uid(), name: tree.title, tree: JSON.parse(JSON.stringify(tree)), savedAt: Date.now() };
               const next = [entry, ...savedTrees.filter(e => e.id !== entry.id)].slice(0, 50);
@@ -3511,7 +4190,6 @@ export default function DigiTree() {
         </div>
       )}
 
-      {/* 読込確認モーダル */}
       {loadConfirm && (
         <div style={{ position: "fixed", inset: 0, background: "#000b", zIndex: 400, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setLoadConfirm(null)}>
           <div onClick={e => e.stopPropagation()} style={{ background: "#0f1a28", border: "1px solid #22c55e55", borderRadius: 12, padding: "20px 24px", width: 300, fontFamily: "monospace", display: "flex", flexDirection: "column", gap: 12 }}>
@@ -3528,7 +4206,6 @@ export default function DigiTree() {
         </div>
       )}
 
-      {/* 上書き確認モーダル */}
       {overwriteConfirm && (
         <div style={{ position: "fixed", inset: 0, background: "#000b", zIndex: 400, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setOverwriteConfirm(null)}>
           <div onClick={e => e.stopPropagation()} style={{ background: "#0f1a28", border: "1px solid #4a9eff55", borderRadius: 12, padding: "20px 24px", width: 300, fontFamily: "monospace", display: "flex", flexDirection: "column", gap: 12 }}>
@@ -3545,7 +4222,6 @@ export default function DigiTree() {
         </div>
       )}
 
-      {/* 削除確認モーダル */}
       {deleteConfirm && (
         <div style={{ position: "fixed", inset: 0, background: "#000b", zIndex: 400, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setDeleteConfirm(null)}>
           <div onClick={e => e.stopPropagation()} style={{ background: "#0f1a28", border: "1px solid #ef444455", borderRadius: 12, padding: "20px 24px", width: 300, fontFamily: "monospace", display: "flex", flexDirection: "column", gap: 12 }}>
@@ -3571,9 +4247,7 @@ export default function DigiTree() {
             borderRadius: 12, padding: "24px 28px", width: 280,
             fontFamily: "monospace", boxShadow: "0 8px 40px #000c",
           }}>
-            <div style={{ fontSize: 16, color: "#dde4f0", fontWeight: 700, marginBottom: 8 }}>
-              全データを消去
-            </div>
+            <div style={{ fontSize: 16, color: "#dde4f0", fontWeight: 700, marginBottom: 8 }}>全データを消去</div>
             <div style={{ fontSize: 11, color: "#7a90a8", marginBottom: 20, lineHeight: 1.6 }}>
               現在のツリーを消去して初期状態に戻します。<br />この操作は元に戻せません。
             </div>
@@ -3584,8 +4258,6 @@ export default function DigiTree() {
                 fontSize: 12, fontFamily: "monospace",
               }}>キャンセル</button>
               <button onClick={() => {
-                idbDel('digitree_tree').catch(() => {});
-                idbDel('digitree_viewport').catch(() => {});
                 idbDel('digitree_tree').catch(() => {});
                 idbDel('digitree_viewport').catch(() => {});
                 setTree(INITIAL_TREE);
@@ -3602,7 +4274,6 @@ export default function DigiTree() {
         </div>
       )}
 
-      {/* 削除確認モーダル */}
       {confirmDialog && (
         <div style={{
           position: "fixed", inset: 0, background: "#000a", zIndex: 200,
@@ -3613,9 +4284,7 @@ export default function DigiTree() {
             borderRadius: 12, padding: "24px 28px", width: 280,
             fontFamily: "monospace", boxShadow: "0 8px 40px #000c",
           }}>
-            <div style={{ fontSize: 16, color: "#dde4f0", marginBottom: 8, fontWeight: 700 }}>
-              ノードを削除
-            </div>
+            <div style={{ fontSize: 16, color: "#dde4f0", marginBottom: 8, fontWeight: 700 }}>ノードを削除</div>
             <div style={{ fontSize: 11, color: "#7a90a8", marginBottom: 20, lineHeight: 1.6 }}>
               このノードと子ノードをすべて削除します。<br />この操作は元に戻せません。
             </div>
@@ -3634,7 +4303,6 @@ export default function DigiTree() {
           </div>
         </div>
       )}
-
 
     </div>
   );
