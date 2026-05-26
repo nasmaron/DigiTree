@@ -1809,8 +1809,11 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
     const k = `${zoneKey}:${itemIdx}`;
     setExpandedMap(prev => ({ ...prev, [k]: !prev[k] }));
   };
-  const [dragState, setDragState] = React.useState(null); // { fromKey, itemIdx, subIdx?, card }
+  const [dragState, setDragState] = React.useState(null);
   const [dragOverZone, setDragOverZone] = React.useState(null);
+  const [dragPos, setDragPos] = React.useState({ x: 0, y: 0 });
+  const pendingDrag = React.useRef(null); // { startX, startY, info }
+  const isDragging = React.useRef(false);
 
   const isNew = (key, card) => !((parentZones[key] || []).includes(card));
 
@@ -1940,31 +1943,9 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
                           onPointerDown={e => {
                             if (!onChangeZones || e.button !== 0) return;
                             e.stopPropagation();
-                            const startX = e.clientX, startY = e.clientY;
-                            let dragging = false;
-                            const onMove = (ev) => {
-                              if (!dragging && (Math.abs(ev.clientX - startX) > 5 || Math.abs(ev.clientY - startY) > 5)) {
-                                dragging = true;
-                                setDragState({ fromKey: zoneKey, itemIdx: i, card });
-                              }
-                              if (dragging) {
-                                const el = document.elementFromPoint(ev.clientX, ev.clientY);
-                                const zone = el?.closest('[data-zonedrop]');
-                                setDragOverZone(zone ? zone.getAttribute('data-zonedrop') : null);
-                              }
-                            };
-                            const onUp = (ev) => {
-                              window.removeEventListener('pointermove', onMove);
-                              window.removeEventListener('pointerup', onUp);
-                              if (dragging) {
-                                const el = document.elementFromPoint(ev.clientX, ev.clientY);
-                                const zone = el?.closest('[data-zonedrop]');
-                                if (zone) handleDrop(zone.getAttribute('data-zonedrop'));
-                                else { setDragState(null); setDragOverZone(null); }
-                              }
-                            };
-                            window.addEventListener('pointermove', onMove);
-                            window.addEventListener('pointerup', onUp);
+                            e.currentTarget.setPointerCapture(e.pointerId);
+                            pendingDrag.current = { startX: e.clientX, startY: e.clientY, info: { fromKey: zoneKey, itemIdx: i, card } };
+                            isDragging.current = false;
                           }}
                           onClick={e => {
                           e.stopPropagation();
@@ -2017,31 +1998,9 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
                               onPointerDown={e => {
                                 if (!onChangeZones || e.button !== 0) return;
                                 e.stopPropagation();
-                                const startX = e.clientX, startY = e.clientY;
-                                let dragging = false;
-                                const onMove = (ev) => {
-                                  if (!dragging && (Math.abs(ev.clientX - startX) > 5 || Math.abs(ev.clientY - startY) > 5)) {
-                                    dragging = true;
-                                    setDragState({ fromKey: zoneKey, itemIdx: i, subIdx, card: c });
-                                  }
-                                  if (dragging) {
-                                    const el = document.elementFromPoint(ev.clientX, ev.clientY);
-                                    const zone = el?.closest('[data-zonedrop]');
-                                    setDragOverZone(zone ? zone.getAttribute('data-zonedrop') : null);
-                                  }
-                                };
-                                const onUp = (ev) => {
-                                  window.removeEventListener('pointermove', onMove);
-                                  window.removeEventListener('pointerup', onUp);
-                                  if (dragging) {
-                                    const el = document.elementFromPoint(ev.clientX, ev.clientY);
-                                    const zone = el?.closest('[data-zonedrop]');
-                                    if (zone) handleDrop(zone.getAttribute('data-zonedrop'));
-                                    else { setDragState(null); setDragOverZone(null); }
-                                  }
-                                };
-                                window.addEventListener('pointermove', onMove);
-                                window.addEventListener('pointerup', onUp);
+                                e.currentTarget.setPointerCapture(e.pointerId);
+                                pendingDrag.current = { startX: e.clientX, startY: e.clientY, info: { fromKey: zoneKey, itemIdx: i, subIdx, card: c } };
+                                isDragging.current = false;
                               }}
                               onClick={e => {
                               e.stopPropagation();
@@ -2099,7 +2058,36 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
   const phaseName = t["ph_" + phaseKey] || phaseKey;
 
   return (
-    <div style={{
+    <>
+    <div
+      onPointerMove={e => {
+        if (!pendingDrag.current) return;
+        const { startX, startY, info } = pendingDrag.current;
+        if (!isDragging.current) {
+          if (Math.abs(e.clientX - startX) > 5 || Math.abs(e.clientY - startY) > 5) {
+            isDragging.current = true;
+            setDragState(info);
+          }
+        }
+        if (isDragging.current) {
+          setDragPos({ x: e.clientX, y: e.clientY });
+          const el = document.elementFromPoint(e.clientX, e.clientY);
+          const zone = el?.closest('[data-zonedrop]');
+          setDragOverZone(zone ? zone.getAttribute('data-zonedrop') : null);
+        }
+      }}
+      onPointerUp={e => {
+        if (!pendingDrag.current) return;
+        if (isDragging.current) {
+          const el = document.elementFromPoint(e.clientX, e.clientY);
+          const zone = el?.closest('[data-zonedrop]');
+          if (zone) handleDrop(zone.getAttribute('data-zonedrop'));
+          else { setDragState(null); setDragOverZone(null); }
+        }
+        pendingDrag.current = null;
+        isDragging.current = false;
+      }}
+      style={{
       width: "100%", height: "100%", boxSizing: "border-box",
       display: "flex", flexDirection: "column", gap: 6,
       fontFamily: "monospace",
@@ -2268,12 +2256,24 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
       )}
 
     </div>
+    {/* ドラッグゴースト */}
+    {dragState && (
+      <div style={{
+        position: "fixed",
+        left: dragPos.x + 12, top: dragPos.y - 16,
+        background: "#0f1a28", border: "2px solid #4a9eff",
+        borderRadius: 8, padding: "6px 14px",
+        fontSize: 13, color: "#4a9eff", fontWeight: 700,
+        pointerEvents: "none", zIndex: 9999,
+        boxShadow: "0 4px 20px #000a",
+        fontFamily: "monospace", whiteSpace: "nowrap",
+      }}>
+        ✦ {dragState.card}
+      </div>
+    )}
+    </>
   );
 }
-
-// ============================================================
-// BOARD VIEW MODAL
-// ============================================================
 
 function BoardViewModal({ boardViewNodeId, setBoardViewNodeId, setBoardView, nodes, selectedNode, t, onUpdateNode, onUndo, onAddChild }) {
   const [childModal, setChildModal] = useState(false);
