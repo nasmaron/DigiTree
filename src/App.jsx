@@ -1944,7 +1944,8 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
                             if (!onChangeZones || e.button !== 0) return;
                             e.stopPropagation();
                             e.currentTarget.setPointerCapture(e.pointerId);
-                            pendingDrag.current = { startX: e.clientX, startY: e.clientY, info: { fromKey: zoneKey, itemIdx: i, card } };
+                            const srcItem = zones[zoneKey]?.[i];
+                            pendingDrag.current = { startX: e.clientX, startY: e.clientY, info: { fromKey: zoneKey, itemIdx: i, card, srcItem } };
                             isDragging.current = false;
                           }}
                           onClick={e => {
@@ -1999,7 +2000,7 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
                                 if (!onChangeZones || e.button !== 0) return;
                                 e.stopPropagation();
                                 e.currentTarget.setPointerCapture(e.pointerId);
-                                pendingDrag.current = { startX: e.clientX, startY: e.clientY, info: { fromKey: zoneKey, itemIdx: i, subIdx, card: c } };
+                                pendingDrag.current = { startX: e.clientX, startY: e.clientY, info: { fromKey: zoneKey, itemIdx: i, subIdx, card: c, srcItem: null } };
                                 isDragging.current = false;
                               }}
                               onClick={e => {
@@ -2092,7 +2093,7 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
             if (zone && snapshot) {
               // handleDropをstateなしで直接実行
               const toKey = zone.getAttribute('data-zonedrop');
-              const { fromKey, itemIdx, subIdx, card } = snapshot;
+              const { fromKey, itemIdx, subIdx, card, srcItem } = snapshot;
               if (fromKey === toKey && subIdx === undefined) return;
               const newZones = JSON.parse(JSON.stringify(zones));
               if (subIdx !== undefined) {
@@ -2101,9 +2102,10 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
                 newZones[fromKey][itemIdx] = st.length === 1 ? st[0] : st;
                 newZones[toKey] = [...(newZones[toKey] || []), card];
               } else {
-                const srcItem = newZones[fromKey][itemIdx];
+                // srcItemを使ってスタックごと移動
+                const moveItem = srcItem !== undefined ? srcItem : newZones[fromKey][itemIdx];
                 newZones[fromKey].splice(itemIdx, 1);
-                newZones[toKey] = [...(newZones[toKey] || []), srcItem];
+                newZones[toKey] = [...(newZones[toKey] || []), moveItem];
               }
               onChangeZones(newZones);
             }
