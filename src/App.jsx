@@ -1901,6 +1901,7 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
         cursor: canDrop ? "pointer" : "default",
         overflow: "hidden", minWidth: 0, boxSizing: "border-box",
         transition: "border-color 0.1s, box-shadow 0.1s",
+        userSelect: "none", WebkitUserSelect: "none",
         ...style,
       }}>
         <div style={{ fontSize: 9, color, fontWeight: 700, letterSpacing: 1, flexShrink: 0 }}>{label}</div>
@@ -1961,7 +1962,8 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
                           fontWeight: _isNew ? 700 : 400,
                           display: "flex", alignItems: "center", gap: 3,
                           flex: 1, minWidth: 0, overflow: "hidden",
-                          cursor: onChangeZones ? "pointer" : "default",
+                          cursor: onChangeZones ? "grab" : "default",
+                          userSelect: "none", WebkitUserSelect: "none",
                         }}>
                           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{card}</span>
                           {_isNew && <span style={{ fontSize: 8, flexShrink: 0 }}>★</span>}
