@@ -1864,9 +1864,7 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
     return (
       <div
         ref={el => onZoneRef && onZoneRef(zoneKey, el)}
-        onDragOver={e => { e.preventDefault(); setDragOverZone(zoneKey); }}
-        onDragLeave={() => setDragOverZone(null)}
-        onDrop={e => { e.preventDefault(); handleDrop(zoneKey); }}
+        data-zonedrop={zoneKey}
         onClick={() => {
         if (!onChangeZones || !moveTarget?.card) return;
         const canMove = moveTarget.fromKey !== zoneKey || moveTarget.subIdx !== undefined;
@@ -1939,9 +1937,35 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
                           </span>
                         )}
                         <span
-                          draggable={!!onChangeZones}
-                          onDragStart={e => { e.stopPropagation(); setDragState({ fromKey: zoneKey, itemIdx: i, card }); }}
-                          onDragEnd={() => { setDragState(null); setDragOverZone(null); }}
+                          onPointerDown={e => {
+                            if (!onChangeZones || e.button !== 0) return;
+                            e.stopPropagation();
+                            const startX = e.clientX, startY = e.clientY;
+                            let dragging = false;
+                            const onMove = (ev) => {
+                              if (!dragging && (Math.abs(ev.clientX - startX) > 5 || Math.abs(ev.clientY - startY) > 5)) {
+                                dragging = true;
+                                setDragState({ fromKey: zoneKey, itemIdx: i, card });
+                              }
+                              if (dragging) {
+                                const el = document.elementFromPoint(ev.clientX, ev.clientY);
+                                const zone = el?.closest('[data-zonedrop]');
+                                setDragOverZone(zone ? zone.getAttribute('data-zonedrop') : null);
+                              }
+                            };
+                            const onUp = (ev) => {
+                              window.removeEventListener('pointermove', onMove);
+                              window.removeEventListener('pointerup', onUp);
+                              if (dragging) {
+                                const el = document.elementFromPoint(ev.clientX, ev.clientY);
+                                const zone = el?.closest('[data-zonedrop]');
+                                if (zone) handleDrop(zone.getAttribute('data-zonedrop'));
+                                else { setDragState(null); setDragOverZone(null); }
+                              }
+                            };
+                            window.addEventListener('pointermove', onMove);
+                            window.addEventListener('pointerup', onUp);
+                          }}
                           onClick={e => {
                           e.stopPropagation();
                           if (!onChangeZones || !setMoveTarget) return;
@@ -1990,9 +2014,35 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
                           const isSubMoving = moveTarget?.card === c && moveTarget?.fromKey === zoneKey && moveTarget?.itemIdx === i && moveTarget?.subIdx === subIdx;
                           return (
                             <span key={ci}
-                              draggable={!!onChangeZones}
-                              onDragStart={e => { e.stopPropagation(); setDragState({ fromKey: zoneKey, itemIdx: i, subIdx, card: c }); }}
-                              onDragEnd={() => { setDragState(null); setDragOverZone(null); }}
+                              onPointerDown={e => {
+                                if (!onChangeZones || e.button !== 0) return;
+                                e.stopPropagation();
+                                const startX = e.clientX, startY = e.clientY;
+                                let dragging = false;
+                                const onMove = (ev) => {
+                                  if (!dragging && (Math.abs(ev.clientX - startX) > 5 || Math.abs(ev.clientY - startY) > 5)) {
+                                    dragging = true;
+                                    setDragState({ fromKey: zoneKey, itemIdx: i, subIdx, card: c });
+                                  }
+                                  if (dragging) {
+                                    const el = document.elementFromPoint(ev.clientX, ev.clientY);
+                                    const zone = el?.closest('[data-zonedrop]');
+                                    setDragOverZone(zone ? zone.getAttribute('data-zonedrop') : null);
+                                  }
+                                };
+                                const onUp = (ev) => {
+                                  window.removeEventListener('pointermove', onMove);
+                                  window.removeEventListener('pointerup', onUp);
+                                  if (dragging) {
+                                    const el = document.elementFromPoint(ev.clientX, ev.clientY);
+                                    const zone = el?.closest('[data-zonedrop]');
+                                    if (zone) handleDrop(zone.getAttribute('data-zonedrop'));
+                                    else { setDragState(null); setDragOverZone(null); }
+                                  }
+                                };
+                                window.addEventListener('pointermove', onMove);
+                                window.addEventListener('pointerup', onUp);
+                              }}
                               onClick={e => {
                               e.stopPropagation();
                               if (!onChangeZones || !setMoveTarget) return;
