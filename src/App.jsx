@@ -1809,8 +1809,11 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
     const k = `${zoneKey}:${itemIdx}`;
     setExpandedMap(prev => ({ ...prev, [k]: !prev[k] }));
   };
-  const [dragState, setDragState] = React.useState(null); // { fromKey, itemIdx, subIdx?, card }
+  const [dragState, setDragState] = React.useState(null);
   const [dragOverZone, setDragOverZone] = React.useState(null);
+  const [dragPos, setDragPos] = React.useState({ x: 0, y: 0 });
+  const pendingDrag = React.useRef(null); // { startX, startY, info }
+  const isDragging = React.useRef(false);
 
   const isNew = (key, card) => !((parentZones[key] || []).includes(card));
 
@@ -1843,24 +1846,16 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
     if (fromKey === toKey && subIdx === undefined) { setDragState(null); setDragOverZone(null); return; }
     const newZones = JSON.parse(JSON.stringify(zones));
     if (subIdx !== undefined) {
+      // スタック内カード単体を移動
       const st = Array.isArray(newZones[fromKey][itemIdx]) ? [...newZones[fromKey][itemIdx]] : [newZones[fromKey][itemIdx]];
       st.splice(subIdx, 1);
       newZones[fromKey][itemIdx] = st.length === 1 ? st[0] : st;
+      newZones[toKey] = [...(newZones[toKey] || []), card];
     } else {
       const srcItem = newZones[fromKey][itemIdx];
-      const srcStack = Array.isArray(srcItem) ? srcItem : [srcItem];
       newZones[fromKey].splice(itemIdx, 1);
-      if (srcStack.length > 1) {
-        // スタックごと移動
-        newZones[toKey] = [...(newZones[toKey] || []), srcStack];
-      } else {
-        newZones[toKey] = [...(newZones[toKey] || []), card];
-        setDragState(null); setDragOverZone(null);
-        onChangeZones(newZones);
-        return;
-      }
+      newZones[toKey] = [...(newZones[toKey] || []), srcItem];
     }
-    newZones[toKey] = [...(newZones[toKey] || []), card];
     onChangeZones(newZones);
     setDragState(null); setDragOverZone(null);
   };
@@ -1872,9 +1867,7 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
     return (
       <div
         ref={el => onZoneRef && onZoneRef(zoneKey, el)}
-        onDragOver={e => { e.preventDefault(); setDragOverZone(zoneKey); }}
-        onDragLeave={() => setDragOverZone(null)}
-        onDrop={e => { e.preventDefault(); handleDrop(zoneKey); }}
+        data-zonedrop={zoneKey}
         onClick={() => {
         if (!onChangeZones || !moveTarget?.card) return;
         const canMove = moveTarget.fromKey !== zoneKey || moveTarget.subIdx !== undefined;
@@ -1909,6 +1902,7 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
         cursor: canDrop ? "pointer" : "default",
         overflow: "hidden", minWidth: 0, boxSizing: "border-box",
         transition: "border-color 0.1s, box-shadow 0.1s",
+        userSelect: "none", WebkitUserSelect: "none",
         ...style,
       }}>
         <div style={{ fontSize: 9, color, fontWeight: 700, letterSpacing: 1, flexShrink: 0 }}>{label}</div>
@@ -1946,9 +1940,13 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
                           </span>
                         )}
                         <span
-                          draggable={!!onChangeZones}
-                          onDragStart={e => { e.stopPropagation(); setDragState({ fromKey: zoneKey, itemIdx: i, card }); }}
-                          onDragEnd={() => { setDragState(null); setDragOverZone(null); }}
+                          onPointerDown={e => {
+                            if (!onChangeZones || e.button !== 0) return;
+                            e.stopPropagation();
+                            e.currentTarget.setPointerCapture(e.pointerId);
+                            pendingDrag.current = { startX: e.clientX, startY: e.clientY, info: { fromKey: zoneKey, itemIdx: i, card } };
+                            isDragging.current = false;
+                          }}
                           onClick={e => {
                           e.stopPropagation();
                           if (!onChangeZones || !setMoveTarget) return;
@@ -1969,7 +1967,8 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
                           fontWeight: _isNew ? 700 : 400,
                           display: "flex", alignItems: "center", gap: 3,
                           flex: 1, minWidth: 0, overflow: "hidden",
-                          cursor: onChangeZones ? "pointer" : "default",
+                          cursor: onChangeZones ? "grab" : "default",
+                          userSelect: "none", WebkitUserSelect: "none",
                         }}>
                           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{card}</span>
                           {_isNew && <span style={{ fontSize: 8, flexShrink: 0 }}>★</span>}
@@ -1996,9 +1995,13 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
                           const isSubMoving = moveTarget?.card === c && moveTarget?.fromKey === zoneKey && moveTarget?.itemIdx === i && moveTarget?.subIdx === subIdx;
                           return (
                             <span key={ci}
-                              draggable={!!onChangeZones}
-                              onDragStart={e => { e.stopPropagation(); setDragState({ fromKey: zoneKey, itemIdx: i, subIdx, card: c }); }}
-                              onDragEnd={() => { setDragState(null); setDragOverZone(null); }}
+                              onPointerDown={e => {
+                                if (!onChangeZones || e.button !== 0) return;
+                                e.stopPropagation();
+                                e.currentTarget.setPointerCapture(e.pointerId);
+                                pendingDrag.current = { startX: e.clientX, startY: e.clientY, info: { fromKey: zoneKey, itemIdx: i, subIdx, card: c } };
+                                isDragging.current = false;
+                              }}
                               onClick={e => {
                               e.stopPropagation();
                               if (!onChangeZones || !setMoveTarget) return;
@@ -2055,10 +2058,40 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
   const phaseName = t["ph_" + phaseKey] || phaseKey;
 
   return (
-    <div style={{
+    <>
+    <div
+      onPointerMove={e => {
+        if (!pendingDrag.current) return;
+        const { startX, startY, info } = pendingDrag.current;
+        if (!isDragging.current) {
+          if (Math.abs(e.clientX - startX) > 5 || Math.abs(e.clientY - startY) > 5) {
+            isDragging.current = true;
+            setDragState(info);
+          }
+        }
+        if (isDragging.current) {
+          setDragPos({ x: e.clientX, y: e.clientY });
+          const el = document.elementFromPoint(e.clientX, e.clientY);
+          const zone = el?.closest('[data-zonedrop]');
+          setDragOverZone(zone ? zone.getAttribute('data-zonedrop') : null);
+        }
+      }}
+      onPointerUp={e => {
+        if (!pendingDrag.current) return;
+        if (isDragging.current) {
+          const el = document.elementFromPoint(e.clientX, e.clientY);
+          const zone = el?.closest('[data-zonedrop]');
+          if (zone) handleDrop(zone.getAttribute('data-zonedrop'));
+          else { setDragState(null); setDragOverZone(null); }
+        }
+        pendingDrag.current = null;
+        isDragging.current = false;
+      }}
+      style={{
       width: "100%", height: "100%", boxSizing: "border-box",
       display: "flex", flexDirection: "column", gap: 6,
       fontFamily: "monospace",
+      maxWidth: 900, margin: "0 auto",
     }}>
 
       {/* フェイズ表示 */}
@@ -2079,9 +2112,9 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
         display: "flex", flexDirection: "column", gap: 6, flexShrink: 0,
       }}>
         <div style={{ fontSize: 9, color: "#4a9eff", fontWeight: 700, letterSpacing: 1 }}>MEMORY</div>
-        <div style={{ display: "flex", gap: 4, alignItems: "stretch" }}>
-          {/* 左側（正・自分側）: 5→1が上行、10→6が下行 */}
-          <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4 }}>
+        <div style={{ display: "flex", gap: 4, alignItems: "stretch", justifyContent: "center" }}>
+          {/* 左側（正・自分側）: 5→1上, 10→6下 */}
+          <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4, maxWidth: 280 }}>
             {[5,4,3,2,1,10,9,8,7,6].map(n => {
               const active = mem >= n;
               return (
@@ -2092,22 +2125,22 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
                   display: "flex", alignItems: "center", justifyContent: "center",
                   fontSize: 14, color: active ? "#000" : "#2a3a52", fontWeight: 700,
                   cursor: onChangeMemory ? "pointer" : "default",
-                  width: "100%",
+                  maxWidth: 48, maxHeight: 48,
                 }}>{n}</div>
               );
             })}
           </div>
           {/* 中央：0 */}
           <div onClick={() => onChangeMemory && onChangeMemory(0)} style={{
-            width: 48, flexShrink: 0, borderRadius: 8,
+            width: 48, maxWidth: 48, flexShrink: 0, borderRadius: 8,
             background: mem === 0 ? "#94a3b8" : "#0b1320",
             border: `2px solid ${mem === 0 ? "#94a3b8" : "#2a3a52"}`,
             display: "flex", alignItems: "center", justifyContent: "center",
             fontSize: 18, color: mem === 0 ? "#000" : "#2a3a52", fontWeight: 900,
             cursor: onChangeMemory ? "pointer" : "default",
           }}>0</div>
-          {/* 右側（負・相手側）: 1〜10 を2列5行 */}
-          <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4 }}>
+          {/* 右側（負・相手側）: 1→5上, 6→10下 */}
+          <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4, maxWidth: 280 }}>
             {Array.from({ length: MAX_MEM }, (_, i) => i + 1).map(n => {
               const active = mem <= -n;
               return (
@@ -2118,7 +2151,7 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
                   display: "flex", alignItems: "center", justifyContent: "center",
                   fontSize: 14, color: active ? "#000" : "#2a3a52", fontWeight: 700,
                   cursor: onChangeMemory ? "pointer" : "default",
-                  width: "100%",
+                  maxWidth: 48, maxHeight: 48,
                 }}>{n}</div>
               );
             })}
@@ -2223,12 +2256,24 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
       )}
 
     </div>
+    {/* ドラッグゴースト */}
+    {dragState && (
+      <div style={{
+        position: "fixed",
+        left: dragPos.x + 12, top: dragPos.y - 16,
+        background: "#0f1a28", border: "2px solid #4a9eff",
+        borderRadius: 8, padding: "6px 14px",
+        fontSize: 13, color: "#4a9eff", fontWeight: 700,
+        pointerEvents: "none", zIndex: 9999,
+        boxShadow: "0 4px 20px #000a",
+        fontFamily: "monospace", whiteSpace: "nowrap",
+      }}>
+        ✦ {dragState.card}
+      </div>
+    )}
+    </>
   );
 }
-
-// ============================================================
-// BOARD VIEW MODAL
-// ============================================================
 
 function BoardViewModal({ boardViewNodeId, setBoardViewNodeId, setBoardView, nodes, selectedNode, t, onUpdateNode, onUndo, onAddChild }) {
   const [childModal, setChildModal] = useState(false);
