@@ -1345,6 +1345,7 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
   const [expandedItems, setExpandedItems] = useState({}); // `${key}:${itemIdx}` -> bool
   const toggleExpanded = (key, itemIdx) =>
     setExpandedItems(prev => ({ ...prev, [`${key}:${itemIdx}`]: !prev[`${key}:${itemIdx}`] }));
+  const [moveStackModal, setMoveStackModal] = useState(null);
   const [stackTarget, setStackTarget] = useState(null);
   const [dupConfirm, setDupConfirm] = useState(null);
   const [addModal, setAddModal] = useState(null);
@@ -1394,6 +1395,38 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0, width: "100%" }}>
+      {moveStackModal && (
+        <div style={{ position: "fixed", inset: 0, background: "#000b", zIndex: 300, display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+          onClick={() => { setMoveStackModal(null); setMoveTarget({ mode: "move", fromKey: null, card: null }); }}
+          onPointerDown={e => e.stopPropagation()}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#0f1a28", border: "1px solid #4a9eff55", borderRadius: "12px 12px 0 0", padding: "16px 16px 32px", width: "100%", maxWidth: 480, display: "flex", flexDirection: "column", gap: 10, fontFamily: "monospace" }}>
+            <div style={{ fontSize: 12, color: "#7a90a8" }}>
+              <span style={{ color: "#4a9eff", fontWeight: 700 }}>「{moveStackModal.card}」</span>（スタック{moveStackModal.stack.length}枚）をどう移動しますか？
+            </div>
+            <div style={{ fontSize: 10, color: "#4a6080" }}>スタック：{moveStackModal.stack.join(" → ")}</div>
+            <button onClick={() => {
+              const { stack, fromKey, fromItemIdx, toKey } = moveStackModal;
+              const z = JSON.parse(JSON.stringify(zones));
+              const fromArr = [...(z[fromKey] || [])]; fromArr.splice(fromItemIdx, 1); z[fromKey] = fromArr;
+              z[toKey] = [...(z[toKey] || []), stack.length === 1 ? stack[0] : stack];
+              onChange(z); setMoveStackModal(null); setMoveTarget({ mode: "move", fromKey: null, card: null });
+            }} style={{ padding: "12px 0", borderRadius: 6, cursor: "pointer", background: "#f59e0b18", border: "1px solid #f59e0b66", color: "#f59e0b", fontSize: 13, fontWeight: 700 }}>
+              スタックごと移動（{moveStackModal.stack.join("→")}）
+            </button>
+            <button onClick={() => {
+              const { card, stack, fromKey, fromItemIdx, toKey } = moveStackModal;
+              const z = JSON.parse(JSON.stringify(zones));
+              const st = [...stack]; st.shift();
+              z[fromKey][fromItemIdx] = st.length === 1 ? st[0] : st;
+              z[toKey] = [...(z[toKey] || []), card];
+              onChange(z); setMoveStackModal(null); setMoveTarget({ mode: "move", fromKey: null, card: null });
+            }} style={{ padding: "12px 0", borderRadius: 6, cursor: "pointer", background: "#4a9eff18", border: "1px solid #4a9eff66", color: "#4a9eff", fontSize: 13, fontWeight: 700 }}>
+              「{moveStackModal.card}」（一番上）だけ移動
+            </button>
+            <button onClick={() => { setMoveStackModal(null); setMoveTarget({ mode: "move", fromKey: null, card: null }); }} style={{ padding: "8px 0", borderRadius: 6, cursor: "pointer", background: "none", border: "1px solid #2a3a52", color: "#4a6080", fontSize: 12 }}>キャンセル</button>
+          </div>
+        </div>
+      )}
       {stackModal && (
         <div style={{
           position: "fixed", inset: 0, background: "#000b", zIndex: 300,
@@ -1617,15 +1650,25 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
                         : [newZones[moveTarget.fromKey][moveTarget.itemIdx]];
                       fromStack.splice(moveTarget.subIdx, 1);
                       newZones[moveTarget.fromKey][moveTarget.itemIdx] = fromStack.length === 1 ? fromStack[0] : fromStack;
+                      newZones[key] = [...(newZones[key] || []), moveTarget.card];
+                      onChange(newZones);
+                      setMoveTarget({ mode: "move", fromKey: null, card: null });
                     } else {
-                      // アイテムごと抜く
-                      const fromArr = [...(newZones[moveTarget.fromKey] || [])];
-                      fromArr.splice(moveTarget.itemIdx, 1);
-                      newZones[moveTarget.fromKey] = fromArr;
+                      const srcItem = zones[moveTarget.fromKey]?.[moveTarget.itemIdx];
+                      const srcStack = Array.isArray(srcItem) ? srcItem : [srcItem];
+                      if (srcStack.length > 1) {
+                        // スタック持ち→moveStackModalで選択
+                        setMoveStackModal({ card: moveTarget.card, stack: srcStack, fromKey: moveTarget.fromKey, fromItemIdx: moveTarget.itemIdx, toKey: key });
+                      } else {
+                        // 単体→即移動
+                        const fromArr = [...(newZones[moveTarget.fromKey] || [])];
+                        fromArr.splice(moveTarget.itemIdx, 1);
+                        newZones[moveTarget.fromKey] = fromArr;
+                        newZones[key] = [...(newZones[key] || []), moveTarget.card];
+                        onChange(newZones);
+                        setMoveTarget({ mode: "move", fromKey: null, card: null });
+                      }
                     }
-                    newZones[key] = [...(newZones[key] || []), moveTarget.card];
-                    onChange(newZones);
-                    setMoveTarget({ mode: "move", fromKey: null, card: null });
                   }
                 }}>
                   <div style={{ display: "flex", alignItems: "center" }}>
