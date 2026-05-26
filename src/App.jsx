@@ -2059,6 +2059,7 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
       width: "100%", height: "100%", boxSizing: "border-box",
       display: "flex", flexDirection: "column", gap: 6,
       fontFamily: "monospace",
+      maxWidth: 900, margin: "0 auto",
     }}>
 
       {/* フェイズ表示 */}
