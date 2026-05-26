@@ -1809,6 +1809,8 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
     const k = `${zoneKey}:${itemIdx}`;
     setExpandedMap(prev => ({ ...prev, [k]: !prev[k] }));
   };
+  const [dragState, setDragState] = React.useState(null); // { fromKey, itemIdx, subIdx?, card }
+  const [dragOverZone, setDragOverZone] = React.useState(null);
 
   const isNew = (key, card) => !((parentZones[key] || []).includes(card));
 
@@ -1835,11 +1837,45 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
     );
   };
 
+  const handleDrop = (toKey) => {
+    if (!dragState || !onChangeZones) return;
+    const { fromKey, itemIdx, subIdx, card } = dragState;
+    if (fromKey === toKey && subIdx === undefined) { setDragState(null); setDragOverZone(null); return; }
+    const newZones = JSON.parse(JSON.stringify(zones));
+    if (subIdx !== undefined) {
+      const st = Array.isArray(newZones[fromKey][itemIdx]) ? [...newZones[fromKey][itemIdx]] : [newZones[fromKey][itemIdx]];
+      st.splice(subIdx, 1);
+      newZones[fromKey][itemIdx] = st.length === 1 ? st[0] : st;
+    } else {
+      const srcItem = newZones[fromKey][itemIdx];
+      const srcStack = Array.isArray(srcItem) ? srcItem : [srcItem];
+      newZones[fromKey].splice(itemIdx, 1);
+      if (srcStack.length > 1) {
+        // スタックごと移動
+        newZones[toKey] = [...(newZones[toKey] || []), srcStack];
+      } else {
+        newZones[toKey] = [...(newZones[toKey] || []), card];
+        setDragState(null); setDragOverZone(null);
+        onChangeZones(newZones);
+        return;
+      }
+    }
+    newZones[toKey] = [...(newZones[toKey] || []), card];
+    onChangeZones(newZones);
+    setDragState(null); setDragOverZone(null);
+  };
+
   const ZoneBox = ({ label, zoneKey, color, style = {}, children }) => {
     const cards = z[zoneKey] || [];
-    const canDrop = onChangeZones && moveTarget?.card && (moveTarget.fromKey !== zoneKey || moveTarget.subIdx !== undefined);
+    const canDrop = onChangeZones && (dragState || (moveTarget?.card && (moveTarget.fromKey !== zoneKey || moveTarget.subIdx !== undefined)));
+    const isDragOver = dragOverZone === zoneKey;
     return (
-      <div ref={el => onZoneRef && onZoneRef(zoneKey, el)} onClick={() => {
+      <div
+        ref={el => onZoneRef && onZoneRef(zoneKey, el)}
+        onDragOver={e => { e.preventDefault(); setDragOverZone(zoneKey); }}
+        onDragLeave={() => setDragOverZone(null)}
+        onDrop={e => { e.preventDefault(); handleDrop(zoneKey); }}
+        onClick={() => {
         if (!onChangeZones || !moveTarget?.card) return;
         const canMove = moveTarget.fromKey !== zoneKey || moveTarget.subIdx !== undefined;
         if (!canMove) return;
@@ -1866,12 +1902,13 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
         setMoveTarget({ mode: "move", fromKey: null, card: null });
       }} style={{
         background: "#090f1e",
-        border: `1px solid ${canDrop ? color + "cc" : color + "66"}`,
+        border: `1px solid ${isDragOver ? color : canDrop ? color + "cc" : color + "66"}`,
         borderRadius: 6, padding: "6px 8px",
         display: "flex", flexDirection: "column", gap: 4,
-        boxShadow: canDrop ? `0 0 8px ${color}44` : "none",
+        boxShadow: isDragOver ? `0 0 12px ${color}88` : canDrop ? `0 0 8px ${color}44` : "none",
         cursor: canDrop ? "pointer" : "default",
         overflow: "hidden", minWidth: 0, boxSizing: "border-box",
+        transition: "border-color 0.1s, box-shadow 0.1s",
         ...style,
       }}>
         <div style={{ fontSize: 9, color, fontWeight: 700, letterSpacing: 1, flexShrink: 0 }}>{label}</div>
@@ -1908,7 +1945,11 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
                             {zoneKey === "security" ? (isRest ? "裏" : "表") : (isRest ? "▶︎" : "▲")}
                           </span>
                         )}
-                        <span onClick={e => {
+                        <span
+                          draggable={!!onChangeZones}
+                          onDragStart={e => { e.stopPropagation(); setDragState({ fromKey: zoneKey, itemIdx: i, card }); }}
+                          onDragEnd={() => { setDragState(null); setDragOverZone(null); }}
+                          onClick={e => {
                           e.stopPropagation();
                           if (!onChangeZones || !setMoveTarget) return;
                           if (!moveTarget?.card) {
@@ -1954,7 +1995,11 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
                           const subIdx = ci + 1;
                           const isSubMoving = moveTarget?.card === c && moveTarget?.fromKey === zoneKey && moveTarget?.itemIdx === i && moveTarget?.subIdx === subIdx;
                           return (
-                            <span key={ci} onClick={e => {
+                            <span key={ci}
+                              draggable={!!onChangeZones}
+                              onDragStart={e => { e.stopPropagation(); setDragState({ fromKey: zoneKey, itemIdx: i, subIdx, card: c }); }}
+                              onDragEnd={() => { setDragState(null); setDragOverZone(null); }}
+                              onClick={e => {
                               e.stopPropagation();
                               if (!onChangeZones || !setMoveTarget) return;
                               if (!moveTarget?.card) {
@@ -2035,9 +2080,9 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
       }}>
         <div style={{ fontSize: 9, color: "#4a9eff", fontWeight: 700, letterSpacing: 1 }}>MEMORY</div>
         <div style={{ display: "flex", gap: 4, alignItems: "stretch" }}>
-          {/* 左側（正・自分側）: 1〜10 を2列5行 */}
+          {/* 左側（正・自分側）: 5→1が上行、10→6が下行 */}
           <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4 }}>
-            {Array.from({ length: MAX_MEM }, (_, i) => MAX_MEM - i).map(n => {
+            {[5,4,3,2,1,10,9,8,7,6].map(n => {
               const active = mem >= n;
               return (
                 <div key={n} onClick={() => onChangeMemory && onChangeMemory(n)} style={{
