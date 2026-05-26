@@ -2079,13 +2079,39 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
       onPointerUp={e => {
         if (!pendingDrag.current) return;
         if (isDragging.current) {
-          const el = document.elementFromPoint(e.clientX, e.clientY);
-          const zone = el?.closest('[data-zonedrop]');
-          if (zone) handleDrop(zone.getAttribute('data-zonedrop'));
-          else { setDragState(null); setDragOverZone(null); }
+          // ゴーストを先に消してからelementFromPointで正確なターゲットを取得
+          const snapshot = { ...dragState };
+          setDragState(null);
+          setDragOverZone(null);
+          pendingDrag.current = null;
+          isDragging.current = false;
+          // 少し遅延させてゴーストが消えてからドロップ判定
+          requestAnimationFrame(() => {
+            const el = document.elementFromPoint(e.clientX, e.clientY);
+            const zone = el?.closest('[data-zonedrop]');
+            if (zone && snapshot) {
+              // handleDropをstateなしで直接実行
+              const toKey = zone.getAttribute('data-zonedrop');
+              const { fromKey, itemIdx, subIdx, card } = snapshot;
+              if (fromKey === toKey && subIdx === undefined) return;
+              const newZones = JSON.parse(JSON.stringify(zones));
+              if (subIdx !== undefined) {
+                const st = Array.isArray(newZones[fromKey][itemIdx]) ? [...newZones[fromKey][itemIdx]] : [newZones[fromKey][itemIdx]];
+                st.splice(subIdx, 1);
+                newZones[fromKey][itemIdx] = st.length === 1 ? st[0] : st;
+                newZones[toKey] = [...(newZones[toKey] || []), card];
+              } else {
+                const srcItem = newZones[fromKey][itemIdx];
+                newZones[fromKey].splice(itemIdx, 1);
+                newZones[toKey] = [...(newZones[toKey] || []), srcItem];
+              }
+              onChangeZones(newZones);
+            }
+          });
+        } else {
+          pendingDrag.current = null;
+          isDragging.current = false;
         }
-        pendingDrag.current = null;
-        isDragging.current = false;
       }}
       style={{
       width: "100%", height: "100%", boxSizing: "border-box",
