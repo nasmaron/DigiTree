@@ -2081,7 +2081,7 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
         if (!pendingDrag.current) return;
         if (isDragging.current) {
           // ゴーストを先に消してからelementFromPointで正確なターゲットを取得
-          const snapshot = { ...dragState };
+          const snapshot = { ...pendingDrag.current.info };
           setDragState(null);
           setDragOverZone(null);
           pendingDrag.current = null;
