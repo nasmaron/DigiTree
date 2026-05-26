@@ -1843,24 +1843,16 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
     if (fromKey === toKey && subIdx === undefined) { setDragState(null); setDragOverZone(null); return; }
     const newZones = JSON.parse(JSON.stringify(zones));
     if (subIdx !== undefined) {
+      // スタック内カード単体を移動
       const st = Array.isArray(newZones[fromKey][itemIdx]) ? [...newZones[fromKey][itemIdx]] : [newZones[fromKey][itemIdx]];
       st.splice(subIdx, 1);
       newZones[fromKey][itemIdx] = st.length === 1 ? st[0] : st;
+      newZones[toKey] = [...(newZones[toKey] || []), card];
     } else {
       const srcItem = newZones[fromKey][itemIdx];
-      const srcStack = Array.isArray(srcItem) ? srcItem : [srcItem];
       newZones[fromKey].splice(itemIdx, 1);
-      if (srcStack.length > 1) {
-        // スタックごと移動
-        newZones[toKey] = [...(newZones[toKey] || []), srcStack];
-      } else {
-        newZones[toKey] = [...(newZones[toKey] || []), card];
-        setDragState(null); setDragOverZone(null);
-        onChangeZones(newZones);
-        return;
-      }
+      newZones[toKey] = [...(newZones[toKey] || []), srcItem];
     }
-    newZones[toKey] = [...(newZones[toKey] || []), card];
     onChangeZones(newZones);
     setDragState(null); setDragOverZone(null);
   };
@@ -2080,7 +2072,7 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
         display: "flex", flexDirection: "column", gap: 6, flexShrink: 0,
       }}>
         <div style={{ fontSize: 9, color: "#4a9eff", fontWeight: 700, letterSpacing: 1 }}>MEMORY</div>
-        <div style={{ display: "flex", gap: 4, alignItems: "stretch" }}>
+        <div style={{ display: "flex", gap: 4, alignItems: "stretch", justifyContent: "center" }}>
           {/* 左側（正・自分側）: 5→1上, 10→6下 */}
           <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4, maxWidth: 280 }}>
             {[5,4,3,2,1,10,9,8,7,6].map(n => {
