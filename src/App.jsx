@@ -723,32 +723,48 @@ const generateLabel = (node, parentNode) => {
   const childMain      = node.meta?.zones?.main           || [];
   const parentBreeding = parentNode.meta?.zones?.breeding || [];
 
-  // カード名の括弧より前だけ取る（ラベル表示用）
-  const baseName = (name) => name.includes('（') ? name.slice(0, name.indexOf('（')).trim() : name;
+  // スタック配列または文字列から先頭カード名を取得
+  const topCard = (item) => Array.isArray(item) ? item[0] : item;
+  // スタック配列または文字列から進化元（2枚目以降）を取得
+  const hasStack = (item) => Array.isArray(item) && item.length > 1;
+
+  const parentMainTops = parentMain.map(topCard);
+  const parentBreedingTops = parentBreeding.map(topCard);
 
   const events = [];
 
-  for (const card of childMain) {
-    if (parentMain.includes(card)) continue; // 変化なし
+  for (const item of childMain) {
+    const top = topCard(item);
+    if (!top) continue;
 
-    // 最初の（でtopとunderに分割
-    const firstParen = card.indexOf('（');
-    const top   = firstParen !== -1 ? card.slice(0, firstParen).trim() : card;
-    const under = firstParen !== -1 ? card.slice(firstParen + 1, card.length - 1).trim() : null;
+    // 親に同じtopカードがあるか確認
+    const parentItem = parentMain.find(p => topCard(p) === top);
+    if (parentItem !== undefined) {
+      // 親にあった → スタック枚数が増えたなら進化（上に重ねられた）
+      const parentStack = Array.isArray(parentItem) ? parentItem : [parentItem];
+      const childStack = Array.isArray(item) ? item : [item];
+      if (childStack.length > parentStack.length) {
+        // 増えた分の一番上が新しく重ねたカード = top
+        // 直下（index1）が進化元
+        events.push(`${childStack[1]}→${top}進化`);
+      }
+      continue;
+    }
 
-    // 育成エリアから来た単体カード = 移動（スタックにはならない）
-    if (parentBreeding.some(c => c === card)) {
+    // 育成エリアから来た = 移動
+    if (parentBreedingTops.includes(top)) {
       events.push(`${top}移動`);
       continue;
     }
 
-    // スタック形式 = 進化
-    if (under !== null) {
-      events.push(`${baseName(under)}→${top}進化`);
+    // スタックあり = 進化（index1が直前の進化元）
+    if (hasStack(item)) {
+      const under = item[1]; // index1 = 直前の進化元
+      events.push(`${under}→${top}進化`);
       continue;
     }
 
-    // 単体で新規登場 = 登場
+    // 単体で新規登場
     events.push(`${top}登場`);
   }
 
@@ -789,7 +805,7 @@ const makeNode = (parentId, turn, offsetY, action = {}) => ({
   children: [],
   state: {
     turn,
-    phase: "my",
+    phase: "main",
     memory: 1,
     myHand: 0,
     oppHand: 0,
@@ -904,33 +920,35 @@ function MemoryGauge({ value, onChange, compact, memLabel, t = {} }) {
       </div>
       <div style={{ position: "relative", height: 7, background: "#0f172a", borderRadius: 4, overflow: "hidden" }}>
         <div style={{
-          position: "absolute", left: "50%", top: 0, bottom: 0,
+          position: "absolute", right: "50%", top: 0, bottom: 0,
           width: `${Math.abs(value) / max * 50}%`,
-          background: `linear-gradient(90deg, ${color}88, ${color})`,
-          transform: value >= 0 ? "translateX(0)" : "translateX(-100%)",
+          background: value >= 0
+            ? `linear-gradient(90deg, ${color}, ${color}88)`
+            : `linear-gradient(90deg, ${color}88, ${color})`,
+          transform: value >= 0 ? "translateX(0)" : "translateX(100%)",
         }} />
         <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: "#334155" }} />
       </div>
       {onChange && (
         <>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <button onClick={() => onChange(Math.max(-10, value - 1))} style={{
-              width: 26, height: 26, background: "#0b1320", border: "1px solid #1a2535",
-              borderRadius: 4, color: "#ef4444", cursor: "pointer", fontSize: 14,
-              display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-            }}>◀</button>
-            <input type="range" min={-10} max={10} value={value}
-              onChange={e => onChange(parseInt(e.target.value))}
-              style={{ flex: 1, accentColor: color, cursor: "pointer" }} />
             <button onClick={() => onChange(Math.min(10, value + 1))} style={{
               width: 26, height: 26, background: "#0b1320", border: "1px solid #1a2535",
               borderRadius: 4, color: "#4a9eff", cursor: "pointer", fontSize: 14,
               display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+            }}>◀</button>
+            <input type="range" min={-10} max={10} value={-value}
+              onChange={e => onChange(-parseInt(e.target.value))}
+              style={{ flex: 1, accentColor: color, cursor: "pointer" }} />
+            <button onClick={() => onChange(Math.max(-10, value - 1))} style={{
+              width: 26, height: 26, background: "#0b1320", border: "1px solid #1a2535",
+              borderRadius: 4, color: "#ef4444", cursor: "pointer", fontSize: 14,
+              display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
             }}>▶</button>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 9, color: "#334155" }}>{"相手←"}</span>
             <span style={{ fontSize: 9, color: "#334155" }}>{"→自分"}</span>
+            <span style={{ fontSize: 9, color: "#334155" }}>{"相手←"}</span>
           </div>
         </>
       )}
@@ -970,7 +988,7 @@ function BoardNodeCard({ node, parentNode, isSelected, onSelect, onAddChild, onD
     fn();
   };
 
-  const phase = node.state.phase || "main";
+  const phase = PHASES.includes(node.state?.phase) ? node.state.phase : "main";
   const phaseLabel = getPhaseLabel(t, phase);
 
   return (
@@ -1162,19 +1180,14 @@ function BoardNodeCard({ node, parentNode, isSelected, onSelect, onAddChild, onD
               <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
                 {cards.length === 0
                   ? <span style={{ fontSize: 10, color: "#2a3a52", fontStyle: "italic" }}>{t.none_label || "なし"}</span>
-                  : cards.map(card => {
+                  : cards.map((item, itemIdx) => {
+                      const stack = Array.isArray(item) ? item : [item];
+                      const card = stack[0];
+                      const stackCount = stack.length;
                       const parentCards = parentNode?.meta?.zones?.[key] || [];
-                      const isNew = !parentCards.includes(card);
+                      const isNew = !parentCards.some(p => (Array.isArray(p) ? p[0] : p) === card);
                       return (
-                        <span key={card} style={{
-                          background: isNew ? `${color}40` : `${color}18`,
-                          border: isNew ? `1.5px solid ${color}` : `1px solid ${color}55`,
-                          borderRadius: 4, padding: "2px 6px",
-                          fontSize: 10, color,
-                          fontWeight: isNew ? 700 : 400,
-                          boxShadow: isNew ? `0 0 4px ${color}66` : "none",
-                          wordBreak: "break-all",
-                        }}>{card}{isNew && <span style={{ fontSize: 8, marginLeft: 2, opacity: 0.8 }}>★</span>}</span>
+                        <NodeStackChip key={itemIdx} stack={stack} card={card} stackCount={stackCount} isNew={isNew} color={color} />
                       );
                     })
                 }
@@ -1287,6 +1300,41 @@ const ZONE_DEFS = [
   { key: "security", label: "セキュリティ", color: "#ef4444" },
 ];
 
+// ツリーノード上のスタック表示チップ
+function NodeStackChip({ stack, card, stackCount, isNew, color }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 1, width: stackCount > 1 ? "100%" : "auto" }}>
+      <span style={{
+        background: isNew ? `${color}40` : `${color}18`,
+        border: isNew ? `1.5px solid ${color}` : `1px solid ${color}55`,
+        borderRadius: stackCount > 1 ? "4px 4px 0 0" : 4,
+        padding: "2px 6px", fontSize: 10, color,
+        fontWeight: isNew ? 700 : 400,
+        boxShadow: isNew ? `0 0 4px ${color}66` : "none",
+        display: "inline-flex", alignItems: "center", gap: 2,
+      }}>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{card}</span>
+        {isNew && <span style={{ fontSize: 8, opacity: 0.8, flexShrink: 0 }}>★</span>}
+      </span>
+      {stack.slice(1).map((c, ci) => (
+        <span key={ci} style={{
+          background: `${color}0e`,
+          border: `1px solid ${color}33`,
+          borderTop: "none",
+          borderRadius: ci === stack.length - 2 ? "0 0 4px 4px" : 0,
+          padding: "2px 6px 2px 12px",
+          fontSize: 9, color: color + "bb",
+          display: "flex", alignItems: "center", gap: 3,
+        }}>
+          <span style={{ fontSize: 7, opacity: 0.5 }}>└</span>
+          <span>{c}</span>
+          <span style={{ fontSize: 7, opacity: 0.4, marginLeft: "auto" }}>進化元{ci + 1}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, parentZones, onPropagateUp, t = {}, settings = {}, moveTarget, setMoveTarget, deleteMode = false, selectedCards = [], setSelectedCards = () => {}, restMode = false, cardStates = {}, onToggleCardState = () => {} }) {
   const [inputs, setInputs] = useState({});
   const [editing, setEditing] = useState({});
@@ -1294,6 +1342,9 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
   const [dragOver, setDragOver] = useState(null);
   const dragRef = useRef(null);
   const [stackModal, setStackModal] = useState(null);
+  const [expandedItems, setExpandedItems] = useState({}); // `${key}:${itemIdx}` -> bool
+  const toggleExpanded = (key, itemIdx) =>
+    setExpandedItems(prev => ({ ...prev, [`${key}:${itemIdx}`]: !prev[`${key}:${itemIdx}`] }));
   const [stackTarget, setStackTarget] = useState(null);
   const [dupConfirm, setDupConfirm] = useState(null);
   const [addModal, setAddModal] = useState(null);
@@ -1304,27 +1355,18 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
     const val = forcedVal !== undefined ? forcedVal : (inputs[key] || "").trim();
     if (!val) return;
     const current = zones[key] || [];
-    const baseName = val.replace(/（\d+）$/, "");
-    const hasSame = current.some(c => c === val || c.replace(/（\d+）$/, "") === baseName);
-    if (hasSame && !current.some(c => c === val && forcedVal !== undefined)) {
-      if (forcedVal !== undefined) {
-        const nums = current
-          .map(c => { const m = c.match(/^(.+)（(\d+)）$/); return m && m[1] === baseName ? parseInt(m[2]) : null; })
-          .filter(n => n !== null);
-        const nextNum = nums.length > 0 ? Math.max(...nums) + 1 : 2;
-        const numbered = current.includes(val) ? `${baseName}（${nextNum}）` : val;
-        setDupConfirm({ key, val, numbered });
-        return;
-      }
-      const nums = current
-        .map(c => { const m = c.match(/^(.+)（(\d+)）$/); return m && m[1] === baseName ? parseInt(m[2]) : null; })
-        .filter(n => n !== null);
-      const nextNum = nums.length > 0 ? Math.max(...nums) + 1 : 2;
-      const numbered = current.includes(val) ? `${baseName}（${nextNum}）` : val;
-      setDupConfirm({ key, val, numbered });
-      return;
+    // 全カード名をフラットに取得（スタック内含む）
+    const allNames = current.flatMap(item => Array.isArray(item) ? item : [item]);
+    let addVal = val;
+    if (allNames.some(c => c === val)) {
+      const base = val.replace(/\d+$/, "").trimEnd();
+      const nums = allNames.map(c => {
+        const m = c.match(/^(.+?)(\d+)$/);
+        return m && m[1].trimEnd() === base ? parseInt(m[2]) : null;
+      }).filter(n => n !== null);
+      addVal = `${base}${nums.length > 0 ? Math.max(...nums) + 1 : 2}`;
     }
-    onChange({ ...zones, [key]: [...current, val] });
+    onChange({ ...zones, [key]: [...current, addVal] });
     if (forcedVal === undefined) setInputs(p => ({ ...p, [key]: "" }));
   };
 
@@ -1356,7 +1398,7 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
         <div style={{
           position: "fixed", inset: 0, background: "#000b", zIndex: 300,
           display: "flex", alignItems: "flex-end", justifyContent: "center",
-        }} onClick={() => { if (stackModal?.zonesSnapshot) onChange(stackModal.zonesSnapshot); setStackModal(null); setMoveTarget({ mode: "move", fromKey: null, card: null }); }}
+        }} onClick={() => { setStackModal(null); setMoveTarget({ mode: "move", fromKey: null, card: null }); }}
            onPointerDown={e => e.stopPropagation()}>
           <div onClick={e => e.stopPropagation()} style={{
             background: "#0f1a28", border: "1px solid #4a9eff55",
@@ -1365,78 +1407,71 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
             display: "flex", flexDirection: "column", gap: 10,
             fontFamily: "monospace",
           }}>
-            <div style={{ fontSize: 12, color: "#7a90a8", marginBottom: 4 }}>
-              <span style={{ color: "#4a9eff", fontWeight: 700 }}>「{stackModal.card}」</span>
-              {" "}{t.stack_label || "を"}{" "}
-              <span style={{ color: "#f59e0b", fontWeight: 700 }}>「{stackModal.targetCard}」</span>
-              {" "}{t.stack_against || "に対して："}
-            </div>
-            <button onClick={() => {
-              const { card, fromKey, targetCard, targetKey, zonesSnapshot } = stackModal;
-              const newCard = `${card}（${targetCard}）`;
-              const z = JSON.parse(JSON.stringify(zonesSnapshot));
-              if (fromKey === targetKey) {
-                z[fromKey] = (z[fromKey] || []).reduce((acc, c) => {
-                  if (c === card) return acc;
-                  acc.push(c === targetCard ? newCard : c);
-                  return acc;
-                }, []);
-              } else {
-                z[fromKey] = (z[fromKey] || []).filter(c => c !== card);
-                z[targetKey] = (z[targetKey] || []).map(c => c === targetCard ? newCard : c);
-              }
-              onChange(z);
-              setStackModal(null);
-              setMoveTarget({ mode: "move", fromKey: null, card: null });
-            }} style={{
-              padding: "12px 0", borderRadius: 6, cursor: "pointer",
-              background: "#4a9eff18", border: "1px solid #4a9eff66", color: "#4a9eff",
-              fontSize: 13, fontWeight: 700,
-            }}>「{stackModal.targetCard}」{t.stack_on_top || "の上に重ねる"} → {stackModal.card}（{stackModal.targetCard}）</button>
-            <button onClick={() => {
-              const { card, fromKey, targetCard, targetKey, zonesSnapshot } = stackModal;
-              const newCard2 = `${targetCard}（${card}）`;
-              const z = JSON.parse(JSON.stringify(zonesSnapshot));
-              if (fromKey === targetKey) {
-                z[fromKey] = (z[fromKey] || []).reduce((acc, c) => {
-                  if (c === card) return acc;
-                  acc.push(c === targetCard ? newCard2 : c);
-                  return acc;
-                }, []);
-              } else {
-                z[fromKey] = (z[fromKey] || []).filter(c => c !== card);
-                z[targetKey] = (z[targetKey] || []).map(c => c === targetCard ? newCard2 : c);
-              }
-              onChange(z);
-              setStackModal(null);
-              setMoveTarget({ mode: "move", fromKey: null, card: null });
-            }} style={{
-              padding: "12px 0", borderRadius: 6, cursor: "pointer",
-              background: "#a855f718", border: "1px solid #a855f766", color: "#a855f7",
-              fontSize: 13, fontWeight: 700,
-            }}>「{stackModal.targetCard}」{t.stack_on_bottom || "の下に重ねる"} → {stackModal.targetCard}（{stackModal.card}）</button>
-            <button onClick={() => {
-              const newZones = JSON.parse(JSON.stringify(zones));
-              newZones[stackModal.fromKey] = (newZones[stackModal.fromKey] || []).filter(c => c !== stackModal.card);
-              if (!newZones[stackModal.targetKey]) newZones[stackModal.targetKey] = [];
-              newZones[stackModal.targetKey].push(stackModal.card);
-              onChange(newZones);
-              setStackModal(null);
-              setMoveTarget({ mode: "move", fromKey: null, card: null });
-            }} style={{
-              padding: "12px 0", borderRadius: 6, cursor: "pointer",
-              background: "#22c55e18", border: "1px solid #22c55e66", color: "#22c55e",
-              fontSize: 13, fontWeight: 700,
-            }}>{ t.same_area || "同じエリアにそのまま出す"}</button>
-            <button onClick={() => {
-              if (stackModal.zonesSnapshot) onChange(stackModal.zonesSnapshot);
-              setStackModal(null);
-              setMoveTarget({ mode: "move", fromKey: null, card: null });
-            }} style={{
-              padding: "8px 0", borderRadius: 6, cursor: "pointer",
-              background: "none", border: "1px solid #2a3a52", color: "#4a6080",
-              fontSize: 12,
-            }}>{t.cancel || "キャンセル"}</button>
+            {(() => {
+              const { card, fromKey, fromItemIdx, fromSubIdx, targetCard, targetKey, targetItemIdx } = stackModal;
+              const isSelf = fromKey === targetKey && fromItemIdx === targetItemIdx;
+              const srcItem = zones[fromKey]?.[fromItemIdx];
+              const srcStack = Array.isArray(srcItem) ? srcItem : [srcItem || card];
+
+              const doMove = (type) => {
+                const z = JSON.parse(JSON.stringify(zones));
+                if (isSelf) {
+                  const st = Array.isArray(z[fromKey][fromItemIdx]) ? [...z[fromKey][fromItemIdx]] : [z[fromKey][fromItemIdx]];
+                  if (type === "top_out") { const p = st.shift(); z[fromKey][fromItemIdx] = st.length === 1 ? st[0] : st; z[fromKey] = [...z[fromKey], p]; }
+                  else if (type === "rotate") { const p = st.shift(); st.push(p); z[fromKey][fromItemIdx] = st.length === 1 ? st[0] : st; }
+                } else {
+                  // fromを削除してadjIdxを返す
+                  let adjIdx = targetItemIdx;
+                  if (fromSubIdx !== undefined) {
+                    const fs = Array.isArray(z[fromKey][fromItemIdx]) ? [...z[fromKey][fromItemIdx]] : [z[fromKey][fromItemIdx]];
+                    fs.splice(fromSubIdx, 1);
+                    z[fromKey][fromItemIdx] = fs.length === 1 ? fs[0] : fs;
+                  } else if (fromItemIdx !== undefined) {
+                    const fa = [...(z[fromKey] || [])];
+                    fa.splice(fromItemIdx, 1);
+                    z[fromKey] = fa;
+                    if (fromKey === targetKey && fromItemIdx < targetItemIdx) adjIdx = targetItemIdx - 1;
+                  }
+                  // targetを操作
+                  const tArr = [...(z[targetKey] || [])];
+                  const tItem = tArr[adjIdx];
+                  const tStack = Array.isArray(tItem) ? tItem : [tItem];
+                  if (type === "on_top") { tArr[adjIdx] = [card, ...tStack]; z[targetKey] = tArr; }
+                  else if (type === "on_bottom") { tArr[adjIdx] = [...tStack, card]; z[targetKey] = tArr; }
+                  else if (type === "stack_on_bottom") {
+                    // スタックごと対象スタックの下に入る
+                    tArr[adjIdx] = [...tStack, ...srcStack];
+                    z[targetKey] = tArr;
+                  }
+                  else if (type === "zone_top") { tArr.push(card); z[targetKey] = tArr; }
+                }
+                onChange(z); setStackModal(null); setMoveTarget({ mode: "move", fromKey: null, card: null });
+              };
+
+              const targetZoneLabel = t[ZONE_LABEL_KEYS[targetKey]] || targetKey;
+              const hasStack = fromSubIdx === undefined && srcStack.length > 1;
+
+              return (<>
+                <div style={{ fontSize: 12, color: "#7a90a8", marginBottom: 4 }}>
+                  {isSelf
+                    ? <><span style={{ color: "#4a9eff", fontWeight: 700 }}>「{card}」</span> のスタックを操作：</>
+                    : <><span style={{ color: "#4a9eff", fontWeight: 700 }}>「{card}」</span>{" "}{t.stack_label || "を"}{" "}<span style={{ color: "#f59e0b", fontWeight: 700 }}>「{targetCard}」</span>{" "}{t.stack_against || "に対して："}</>
+                  }
+                </div>
+                {isSelf ? (<>
+                  <div style={{ fontSize: 10, color: "#4a6080" }}>スタック：{srcStack.join(" → ")}</div>
+                  <button onClick={() => doMove("top_out")} style={{ padding: "12px 0", borderRadius: 6, cursor: "pointer", background: "#4a9eff18", border: "1px solid #4a9eff66", color: "#4a9eff", fontSize: 13, fontWeight: 700 }}>「{srcStack[0]}」を同エリアに単体で出す</button>
+                  {srcStack.length > 1 && <button onClick={() => doMove("rotate")} style={{ padding: "12px 0", borderRadius: 6, cursor: "pointer", background: "#a855f718", border: "1px solid #a855f766", color: "#a855f7", fontSize: 13, fontWeight: 700 }}>「{srcStack[0]}」を一番下へ</button>}
+                </>) : (<>
+                  <button onClick={() => doMove("on_top")} style={{ padding: "12px 0", borderRadius: 6, cursor: "pointer", background: "#4a9eff18", border: "1px solid #4a9eff66", color: "#4a9eff", fontSize: 13, fontWeight: 700 }}>「{targetCard}」の上に重ねる（進化）</button>
+                  <button onClick={() => doMove("on_bottom")} style={{ padding: "12px 0", borderRadius: 6, cursor: "pointer", background: "#a855f718", border: "1px solid #a855f766", color: "#a855f7", fontSize: 13, fontWeight: 700 }}>「{targetCard}」の下に入る（進化元）</button>
+                  {hasStack && <button onClick={() => doMove("stack_on_bottom")} style={{ padding: "12px 0", borderRadius: 6, cursor: "pointer", background: "#ec489918", border: "1px solid #ec489966", color: "#ec4899", fontSize: 13, fontWeight: 700 }}>スタックごと「{targetCard}」の下に入る（{srcStack.join("→")}）</button>}
+                  {hasStack && <button onClick={() => { const z2 = JSON.parse(JSON.stringify(zones)); const fa2 = [...(z2[fromKey]||[])]; fa2.splice(fromItemIdx,1); z2[fromKey]=fa2; const ta2=Array.isArray(z2[targetKey])?[...z2[targetKey]]:[]; ta2.push(srcStack.length===1?srcStack[0]:srcStack); z2[targetKey]=ta2; onChange(z2); setStackModal(null); setMoveTarget({mode:"move",fromKey:null,card:null}); }} style={{ padding: "12px 0", borderRadius: 6, cursor: "pointer", background: "#f59e0b18", border: "1px solid #f59e0b66", color: "#f59e0b", fontSize: 13, fontWeight: 700 }}>スタックごと{targetZoneLabel}に出す</button>}
+                  <button onClick={() => doMove("zone_top")} style={{ padding: "12px 0", borderRadius: 6, cursor: "pointer", background: "#22c55e18", border: "1px solid #22c55e66", color: "#22c55e", fontSize: 13, fontWeight: 700 }}>「{card}」だけ{targetZoneLabel}に出す（重ねない）</button>
+                </>)}
+                <button onClick={() => { setStackModal(null); setMoveTarget({ mode: "move", fromKey: null, card: null }); }} style={{ padding: "8px 0", borderRadius: 6, cursor: "pointer", background: "none", border: "1px solid #2a3a52", color: "#4a6080", fontSize: 12 }}>{t.cancel || "キャンセル"}</button>
+              </>);
+            })()}
           </div>
         </div>
       )}
@@ -1572,11 +1607,23 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
                   boxShadow: moveTarget?.card && moveTarget.fromKey !== key ? `0 0 8px ${color}44` : "none",
                 }} onClick={() => {
                   if (stackModal) return;
-                  if (moveTarget?.card && moveTarget.fromKey !== key) {
+                  const canMove = moveTarget?.card && (moveTarget.fromKey !== key || moveTarget.subIdx !== undefined);
+                  if (canMove) {
                     const newZones = JSON.parse(JSON.stringify(zones));
-                    newZones[moveTarget.fromKey] = (newZones[moveTarget.fromKey] || []).filter(c => c !== moveTarget.card);
-                    if (!newZones[key]) newZones[key] = [];
-                    newZones[key] = [...newZones[key], moveTarget.card];
+                    if (moveTarget.subIdx !== undefined) {
+                      // スタック内カードを抜く
+                      const fromStack = Array.isArray(newZones[moveTarget.fromKey][moveTarget.itemIdx])
+                        ? [...newZones[moveTarget.fromKey][moveTarget.itemIdx]]
+                        : [newZones[moveTarget.fromKey][moveTarget.itemIdx]];
+                      fromStack.splice(moveTarget.subIdx, 1);
+                      newZones[moveTarget.fromKey][moveTarget.itemIdx] = fromStack.length === 1 ? fromStack[0] : fromStack;
+                    } else {
+                      // アイテムごと抜く
+                      const fromArr = [...(newZones[moveTarget.fromKey] || [])];
+                      fromArr.splice(moveTarget.itemIdx, 1);
+                      newZones[moveTarget.fromKey] = fromArr;
+                    }
+                    newZones[key] = [...(newZones[key] || []), moveTarget.card];
                     onChange(newZones);
                     setMoveTarget({ mode: "move", fromKey: null, card: null });
                   }
@@ -1584,68 +1631,123 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
                   <div style={{ display: "flex", alignItems: "center" }}>
                     <span style={{ fontSize: 11, color, fontWeight: 800 }}>{label}</span>
                   </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 3, minHeight: 20 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 3, minHeight: 20 }}>
                     {cards.length === 0
                       ? <span style={{ fontSize: 9, color: "#2a3a52", fontStyle: "italic" }}>{t.none_label || "なし"}</span>
-                      : cards.map(card => {
+                      : cards.map((item, itemIdx) => {
+                          const stack = Array.isArray(item) ? item : [item];
+                          const card = stack[0];
+                          const stackCount = stack.length;
                           const parentCards = parentZones?.[key] || [];
-                          const isNew = !parentCards.includes(card);
+                          const isNew = !parentCards.some(p => (Array.isArray(p) ? p[0] : p) === card);
                           const isMoving = moveTarget?.card === card && moveTarget?.fromKey === key;
                           const isRest = cardStates[`${key}:${card}`] === "rest";
-                          const stateIcon = isRest ? "▶︎" : "▲";
+                          const showToggle = !["deck","trash","hand"].includes(key);
+                          const isSelected = deleteMode && selectedCards.some(s => s.key === key && s.itemIdx === itemIdx);
                           return (
-                            <span key={card} onClick={() => {
-                              if (stackModal) return;
-                              if (deleteMode) {
-                                setSelectedCards(prev =>
-                                  prev.some(s => s.key === key && s.card === card)
-                                    ? prev.filter(s => !(s.key === key && s.card === card))
-                                    : [...prev, { key, card }]
-                                );
-                                return;
-                              }
-                              if (restMode) {
-                                onToggleCardState(key, card);
-                                return;
-                              }
-                              if (moveTarget?.mode === "move") {
-                                if (moveTarget.card === null) {
-                                  setMoveTarget({ mode: "move", fromKey: key, card });
-                                } else if (moveTarget.card === card && moveTarget.fromKey === key) {
-                                  setMoveTarget({ mode: "move", fromKey: null, card: null });
-                                } else {
-                                  setStackModal({ card: moveTarget.card, fromKey: moveTarget.fromKey, targetCard: card, targetKey: key, zonesSnapshot: JSON.parse(JSON.stringify(zones)) });
-                                }
-                              }
-                            }} style={{
-                              background: deleteMode && selectedCards.some(s => s.key === key && s.card === card)
-                                ? `#ef444444`
-                                : deleteMode ? `#ef444412`
-                                : restMode ? `${color}28`
-                                : isMoving ? `${color}66` : isNew ? `${color}40` : `${color}18`,
-                              border: `1px solid ${
-                                deleteMode && selectedCards.some(s => s.key === key && s.card === card)
-                                  ? "#ef4444"
-                                  : deleteMode ? "#ef444444"
-                                  : restMode ? color + "88"
-                                  : isMoving ? color : isNew ? color : color + "55"
-                              }`,
-                              borderRadius: 6, padding: "5px 8px",
-                              fontSize: 11,
-                              color: deleteMode ? "#ef4444" : color,
-                              fontWeight: isNew ? 700 : 400,
-                              display: "flex", alignItems: "center", gap: 4,
-                              overflow: "hidden",
-                              cursor: "pointer",
-                              boxShadow: isMoving ? `0 0 6px ${color}88` : isRest ? `0 0 4px ${color}44` : "none",
-                              opacity: isRest ? 0.7 : 1,
-                            }}>
-                              <span style={{ fontSize: 9, flexShrink: 0, opacity: 0.8 }}>{stateIcon}</span>
-                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{card}</span>
-                              {deleteMode && selectedCards.some(s => s.key === key && s.card === card) && (
-                                <span style={{ fontSize: 11, flexShrink: 0 }}>✓</span>
-                              )}
-                            </span>
+                            <div key={itemIdx} style={{ display: "flex", flexDirection: "column", width: "100%" }}>
+                              {/* 先頭カード */}
+                              {(() => {
+                                const expKey = `${key}:${itemIdx}`;
+                                const isExpanded = !!expandedItems[expKey];
+                                return (<>
+                                <div style={{
+                                  border: `1px solid ${isSelected ? "#ef4444" : isMoving ? color : isNew ? color : color + "55"}`,
+                                  borderRadius: stackCount > 1 ? (isExpanded ? "6px 6px 0 0" : "6px") : 6,
+                                  overflow: "hidden",
+                                  boxShadow: isMoving ? `0 0 6px ${color}88` : "none",
+                                  opacity: isRest ? 0.7 : 1,
+                                  display: "flex",
+                                }}>
+                                  {showToggle && (
+                                    <span onClick={e => { e.stopPropagation(); onToggleCardState(key, card); }} style={{
+                                      background: isRest ? color + "33" : color + "22",
+                                      borderRight: `1px solid ${color}55`,
+                                      padding: "5px 8px", fontSize: 11, color,
+                                      display: "flex", alignItems: "center",
+                                      cursor: "pointer", flexShrink: 0,
+                                    }}>{isRest ? "▶︎" : "▲"}</span>
+                                  )}
+                                  <span onClick={e => {
+                                    e.stopPropagation();
+                                    if (deleteMode) {
+                                      setSelectedCards(prev =>
+                                        prev.some(s => s.key === key && s.itemIdx === itemIdx)
+                                          ? prev.filter(s => !(s.key === key && s.itemIdx === itemIdx))
+                                          : [...prev, { key, card, itemIdx }]
+                                      );
+                                      return;
+                                    }
+                                    if (restMode) { onToggleCardState(key, card); return; }
+                                    if (moveTarget?.mode === "move") {
+                                      if (moveTarget.card === null) {
+                                        setMoveTarget({ mode: "move", fromKey: key, card, itemIdx });
+                                      } else if (moveTarget.card === card && moveTarget.fromKey === key) {
+                                        setMoveTarget({ mode: "move", fromKey: null, card: null });
+                                      } else {
+                                        setStackModal({ card: moveTarget.card, fromKey: moveTarget.fromKey, fromItemIdx: moveTarget.itemIdx, fromSubIdx: moveTarget.subIdx, targetCard: card, targetKey: key, targetItemIdx: itemIdx });
+                                      }
+                                    }
+                                  }} style={{
+                                    background: isSelected ? "#ef444422" : deleteMode ? "#ef444412"
+                                      : isMoving ? `${color}55` : isNew ? `${color}40` : `${color}18`,
+                                    padding: "5px 8px", fontSize: 11,
+                                    color: isSelected ? "#ef4444" : deleteMode ? "#ef4444" : color,
+                                    fontWeight: isNew ? 700 : 400,
+                                    display: "flex", alignItems: "center", gap: 4,
+                                    flex: 1, minWidth: 0, cursor: "pointer",
+                                  }}>
+                                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{card}</span>
+                                    {isNew && <span style={{ fontSize: 8, flexShrink: 0 }}>★</span>}
+                                    {isSelected && <span style={{ fontSize: 11, flexShrink: 0 }}>✓</span>}
+                                  </span>
+                                  {stackCount > 1 && (
+                                    <span onClick={e => { e.stopPropagation(); toggleExpanded(key, itemIdx); }} style={{
+                                      background: isExpanded ? color + "44" : color + "22",
+                                      borderLeft: `1px solid ${color}55`,
+                                      padding: "5px 8px", fontSize: 10, color,
+                                      display: "flex", alignItems: "center", gap: 2,
+                                      cursor: "pointer", flexShrink: 0,
+                                    }}>{isExpanded ? "▲" : "▼"}<span style={{ fontSize: 9 }}>{stackCount - 1}</span></span>
+                                  )}
+                                </div>
+                                {/* 進化元（展開時のみ） */}
+                                {isExpanded && stack.slice(1).map((c, ci) => {
+                                  const subIdx = ci + 1;
+                                  const isSubMoving = moveTarget?.card === c && moveTarget?.fromKey === key && moveTarget?.itemIdx === itemIdx && moveTarget?.subIdx === subIdx;
+                                  return (
+                                    <span key={ci} onClick={() => {
+                                      if (deleteMode || restMode) return;
+                                      if (moveTarget?.mode === "move") {
+                                        if (!moveTarget.card) {
+                                          setMoveTarget({ mode: "move", fromKey: key, card: c, itemIdx, subIdx });
+                                        } else if (isSubMoving) {
+                                          setMoveTarget({ mode: "move", fromKey: null, card: null });
+                                        } else {
+                                          setStackModal({ card: moveTarget.card, fromKey: moveTarget.fromKey, fromItemIdx: moveTarget.itemIdx, fromSubIdx: moveTarget.subIdx, targetCard: c, targetKey: key, targetItemIdx: itemIdx });
+                                        }
+                                      }
+                                    }} style={{
+                                      background: isSubMoving ? `${color}33` : `${color}0e`,
+                                      border: `1px solid ${isSubMoving ? color : color + "33"}`,
+                                      borderTop: "none",
+                                      borderRadius: ci === stackCount - 2 ? "0 0 6px 6px" : 0,
+                                      padding: "3px 8px 3px 16px",
+                                      fontSize: 10, color: isSubMoving ? color : color + "bb",
+                                      display: "flex", alignItems: "center", gap: 3,
+                                      cursor: "pointer",
+                                      boxShadow: isSubMoving ? `0 0 4px ${color}88` : "none",
+                                    }}>
+                                      <span style={{ fontSize: 8, opacity: 0.5 }}>└</span>
+                                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c}</span>
+                                      <span style={{ fontSize: 8, opacity: 0.4, marginLeft: "auto" }}>進化元{ci + 1}</span>
+                                      {isSubMoving && <span style={{ fontSize: 9 }}>→</span>}
+                                    </span>
+                                  );
+                                })}
+                                </>);
+                              })()}
+                            </div>
                           );
                         })
                     }
@@ -1668,8 +1770,14 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
           onClick={() => {
             if (selectedCards.length === 0) return;
             const newZones = JSON.parse(JSON.stringify(zones));
-            selectedCards.forEach(({ key, card }) => {
-              newZones[key] = (newZones[key] || []).filter(c => c !== card);
+            // itemIdxの大きい順にspliceしてズレを防ぐ
+            const sorted = [...selectedCards].sort((a, b) =>
+              a.key === b.key ? b.itemIdx - a.itemIdx : 0
+            );
+            sorted.forEach(({ key, itemIdx }) => {
+              if (newZones[key] && itemIdx !== undefined) {
+                newZones[key].splice(itemIdx, 1);
+              }
             });
             onChange(newZones);
             setSelectedCards([]);
@@ -1694,8 +1802,13 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
 // ============================================================
 // BOARD LAYOUT VIEW（プレイシート風）
 // ============================================================
-function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentState = {}, cardStates = {}, onToggleCardState = null, note = undefined }) {
+function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentState = {}, cardStates = {}, onToggleCardState = null, note = undefined, onChangeZones = null, moveTarget = null, setMoveTarget = null, stackModal = null, setStackModal = null, moveStackModal = null, setMoveStackModal = null, onChangeMemory = null, onZoneRef = null }) {
   const z = zones;
+  const [expandedMap, setExpandedMap] = React.useState({});
+  const toggleExpanded = (zoneKey, itemIdx) => {
+    const k = `${zoneKey}:${itemIdx}`;
+    setExpandedMap(prev => ({ ...prev, [k]: !prev[k] }));
+  };
 
   const isNew = (key, card) => !((parentZones[key] || []).includes(card));
 
@@ -1724,20 +1837,155 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
 
   const ZoneBox = ({ label, zoneKey, color, style = {}, children }) => {
     const cards = z[zoneKey] || [];
+    const canDrop = onChangeZones && moveTarget?.card && (moveTarget.fromKey !== zoneKey || moveTarget.subIdx !== undefined);
     return (
-      <div style={{
+      <div ref={el => onZoneRef && onZoneRef(zoneKey, el)} onClick={() => {
+        if (!onChangeZones || !moveTarget?.card) return;
+        const canMove = moveTarget.fromKey !== zoneKey || moveTarget.subIdx !== undefined;
+        if (!canMove) return;
+        const srcItem = zones[moveTarget.fromKey]?.[moveTarget.itemIdx];
+        const srcStack = Array.isArray(srcItem) ? srcItem : [srcItem];
+        if (moveTarget.subIdx === undefined && srcStack.length > 1) {
+          setMoveStackModal({ card: moveTarget.card, stack: srcStack, fromKey: moveTarget.fromKey, fromItemIdx: moveTarget.itemIdx, toKey: zoneKey });
+          return;
+        }
+        const newZones = JSON.parse(JSON.stringify(zones));
+        if (moveTarget.subIdx !== undefined) {
+          const fromStack = Array.isArray(newZones[moveTarget.fromKey][moveTarget.itemIdx])
+            ? [...newZones[moveTarget.fromKey][moveTarget.itemIdx]]
+            : [newZones[moveTarget.fromKey][moveTarget.itemIdx]];
+          fromStack.splice(moveTarget.subIdx, 1);
+          newZones[moveTarget.fromKey][moveTarget.itemIdx] = fromStack.length === 1 ? fromStack[0] : fromStack;
+        } else {
+          const fromArr = [...(newZones[moveTarget.fromKey] || [])];
+          fromArr.splice(moveTarget.itemIdx, 1);
+          newZones[moveTarget.fromKey] = fromArr;
+        }
+        newZones[zoneKey] = [...(newZones[zoneKey] || []), moveTarget.card];
+        onChangeZones(newZones);
+        setMoveTarget({ mode: "move", fromKey: null, card: null });
+      }} style={{
         background: "#090f1e",
-        border: `1px solid ${color}66`,
+        border: `1px solid ${canDrop ? color + "cc" : color + "66"}`,
         borderRadius: 6, padding: "6px 8px",
         display: "flex", flexDirection: "column", gap: 4,
+        boxShadow: canDrop ? `0 0 8px ${color}44` : "none",
+        cursor: canDrop ? "pointer" : "default",
+        overflow: "hidden", minWidth: 0, boxSizing: "border-box",
         ...style,
       }}>
         <div style={{ fontSize: 9, color, fontWeight: 700, letterSpacing: 1, flexShrink: 0 }}>{label}</div>
         {children || (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
             {cards.length === 0
               ? <span style={{ fontSize: 9, color: "#2a3a52", fontStyle: "italic" }}>{t.none_label || "なし"}</span>
-              : cards.map((card, i) => <CardChip key={i} card={card} zoneKey={zoneKey} color={color} />)
+              : cards.map((item, i) => {
+                  const stack = Array.isArray(item) ? item : [item];
+                  const card = stack[0];
+                  const stackCount = stack.length;
+                  const _isNew = isNew(zoneKey, card);
+                  const isRest = cardStates[`${zoneKey}:${card}`] === "rest";
+                  const showToggle = onToggleCardState && !["deck","trash","hand"].includes(zoneKey);
+                  const isMoving = moveTarget?.card === card && moveTarget?.fromKey === zoneKey;
+                  return (
+                    <div key={i} style={{ display: "flex", flexDirection: "column", width: "100%" }}>
+                      <div style={{
+                        border: `1px solid ${isMoving ? color : _isNew ? color : color + "55"}`,
+                        borderRadius: stackCount > 1 ? "6px 6px 0 0" : 6,
+                        overflow: "hidden",
+                        boxShadow: isMoving ? `0 0 6px ${color}88` : "none",
+                        opacity: isRest ? 0.7 : 1,
+                        display: "flex",
+                      }}>
+                        {showToggle && (
+                          <span onClick={e => { e.stopPropagation(); onToggleCardState(zoneKey, card); }} style={{
+                            background: isRest ? color + "33" : color + "22",
+                            borderRight: `1px solid ${color}55`,
+                            padding: "5px 8px", fontSize: 11, color,
+                            display: "flex", alignItems: "center",
+                            cursor: "pointer", flexShrink: 0,
+                          }}>
+                            {zoneKey === "security" ? (isRest ? "裏" : "表") : (isRest ? "▶︎" : "▲")}
+                          </span>
+                        )}
+                        <span onClick={e => {
+                          e.stopPropagation();
+                          if (!onChangeZones || !setMoveTarget) return;
+                          if (!moveTarget?.card) {
+                            setMoveTarget({ mode: "move", fromKey: zoneKey, card, itemIdx: i });
+                          } else if (isMoving) {
+                            if (stackCount > 1) {
+                              setStackModal({ card, fromKey: zoneKey, fromItemIdx: i, targetCard: card, targetKey: zoneKey, targetItemIdx: i });
+                            } else {
+                              setMoveTarget({ mode: "move", fromKey: null, card: null });
+                            }
+                          } else {
+                            setStackModal({ card: moveTarget.card, fromKey: moveTarget.fromKey, fromItemIdx: moveTarget.itemIdx, targetCard: card, targetKey: zoneKey, targetItemIdx: i });
+                          }
+                        }} style={{
+                          background: isMoving ? `${color}55` : _isNew ? `${color}40` : `${color}22`,
+                          padding: "5px 8px", fontSize: 12, color,
+                          fontWeight: _isNew ? 700 : 400,
+                          display: "flex", alignItems: "center", gap: 3,
+                          flex: 1, minWidth: 0, overflow: "hidden",
+                          cursor: onChangeZones ? "pointer" : "default",
+                        }}>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{card}</span>
+                          {_isNew && <span style={{ fontSize: 8, flexShrink: 0 }}>★</span>}
+                        </span>
+                        {stackCount > 1 && (() => {
+                          const expKey = `${zoneKey}:${i}`;
+                          const isExpanded = !!expandedMap[expKey];
+                          return (
+                            <span onClick={e => { e.stopPropagation(); toggleExpanded(zoneKey, i); }} style={{
+                              background: isExpanded ? color + "44" : color + "22",
+                              borderLeft: `1px solid ${color}55`,
+                              padding: "5px 8px", fontSize: 10, color,
+                              display: "flex", alignItems: "center", gap: 2,
+                              cursor: "pointer", flexShrink: 0,
+                            }}>{isExpanded ? "▲" : "▼"}<span style={{ fontSize: 9 }}>{stackCount - 1}</span></span>
+                          );
+                        })()}
+                      </div>
+                      {(() => {
+                        const expKey = `${zoneKey}:${i}`;
+                        const isExpanded = !!expandedMap[expKey];
+                        return isExpanded && stack.slice(1).map((c, ci) => {
+                          const subIdx = ci + 1;
+                          const isSubMoving = moveTarget?.card === c && moveTarget?.fromKey === zoneKey && moveTarget?.itemIdx === i && moveTarget?.subIdx === subIdx;
+                          return (
+                            <span key={ci} onClick={e => {
+                              e.stopPropagation();
+                              if (!onChangeZones || !setMoveTarget) return;
+                              if (!moveTarget?.card) {
+                                setMoveTarget({ mode: "move", fromKey: zoneKey, card: c, itemIdx: i, subIdx });
+                              } else if (isSubMoving) {
+                                setMoveTarget({ mode: "move", fromKey: null, card: null });
+                              } else {
+                                setStackModal({ card: moveTarget.card, fromKey: moveTarget.fromKey, fromItemIdx: moveTarget.itemIdx, fromSubIdx: moveTarget.subIdx, targetCard: c, targetKey: zoneKey, targetItemIdx: i });
+                              }
+                            }} style={{
+                              background: isSubMoving ? `${color}33` : `${color}0e`,
+                              border: `1px solid ${isSubMoving ? color : color + "33"}`,
+                              borderTop: "none",
+                              borderRadius: ci === stackCount - 2 ? "0 0 6px 6px" : 0,
+                              padding: "3px 8px 3px 16px",
+                              fontSize: 10, color: isSubMoving ? color : color + "bb",
+                              display: "flex", alignItems: "center", gap: 3,
+                              cursor: "pointer",
+                              boxShadow: isSubMoving ? `0 0 4px ${color}88` : "none",
+                            }}>
+                              <span style={{ fontSize: 8, opacity: 0.5 }}>└</span>
+                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c}</span>
+                              <span style={{ fontSize: 8, opacity: 0.4, marginLeft: "auto" }}>進化元{ci + 1}</span>
+                              {isSubMoving && <span style={{ fontSize: 9 }}>→</span>}
+                            </span>
+                          );
+                        });
+                      })()}
+                    </div>
+                  );
+                })
             }
           </div>
         )}
@@ -1758,7 +2006,7 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
     return cur - par;
   };
 
-  const phaseKey = state.phase || "main";
+  const phaseKey = PHASES.includes(state?.phase) ? state.phase : "main";
   const phaseName = t["ph_" + phaseKey] || phaseKey;
 
   return (
@@ -1782,47 +2030,50 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
       {/* 1行目：メモリーゲージ */}
       <div style={{
         background: "#090f1e", border: "1px solid #1a2535",
-        borderRadius: 6, padding: "6px 10px",
-        display: "flex", flexDirection: "column", gap: 4, flexShrink: 0,
+        borderRadius: 6, padding: "8px 10px",
+        display: "flex", flexDirection: "column", gap: 6, flexShrink: 0,
       }}>
         <div style={{ fontSize: 9, color: "#4a9eff", fontWeight: 700, letterSpacing: 1 }}>MEMORY</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 1, overflow: "hidden" }}>
-          {/* 左側（正・自分側）: 10→1 */}
-          <div style={{ display: "flex", gap: 1, flex: 1, justifyContent: "flex-end", minWidth: 0 }}>
+        <div style={{ display: "flex", gap: 4, alignItems: "stretch" }}>
+          {/* 左側（正・自分側）: 1〜10 を2列5行 */}
+          <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4 }}>
             {Array.from({ length: MAX_MEM }, (_, i) => MAX_MEM - i).map(n => {
               const active = mem >= n;
               return (
-                <div key={n} style={{
-                  flex: 1, minWidth: 0, aspectRatio: "1/1", borderRadius: "50%",
+                <div key={n} onClick={() => onChangeMemory && onChangeMemory(n)} style={{
+                  aspectRatio: "1/1", borderRadius: "50%",
                   background: active ? "#4a9eff" : "#0b1320",
                   border: `1px solid ${active ? "#4a9eff" : "#1a2535"}`,
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 8, color: active ? "#000" : "#2a3a52", fontWeight: 700,
-                  maxWidth: 24,
+                  fontSize: 14, color: active ? "#000" : "#2a3a52", fontWeight: 700,
+                  cursor: onChangeMemory ? "pointer" : "default",
+                  width: "100%",
                 }}>{n}</div>
               );
             })}
           </div>
           {/* 中央：0 */}
-          <div style={{
-            width: 24, height: 24, borderRadius: "50%", flexShrink: 0,
+          <div onClick={() => onChangeMemory && onChangeMemory(0)} style={{
+            width: 48, flexShrink: 0, borderRadius: 8,
             background: mem === 0 ? "#94a3b8" : "#0b1320",
             border: `2px solid ${mem === 0 ? "#94a3b8" : "#2a3a52"}`,
             display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 9, color: mem === 0 ? "#000" : "#2a3a52", fontWeight: 900,
+            fontSize: 18, color: mem === 0 ? "#000" : "#2a3a52", fontWeight: 900,
+            cursor: onChangeMemory ? "pointer" : "default",
           }}>0</div>
-          {/* 右側（負・相手側）: 1→10 */}
-          <div style={{ display: "flex", gap: 1, flex: 1, minWidth: 0 }}>
+          {/* 右側（負・相手側）: 1〜10 を2列5行 */}
+          <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4 }}>
             {Array.from({ length: MAX_MEM }, (_, i) => i + 1).map(n => {
               const active = mem <= -n;
               return (
-                <div key={n} style={{
-                  flex: 1, minWidth: 0, aspectRatio: "1/1", borderRadius: "50%",
+                <div key={n} onClick={() => onChangeMemory && onChangeMemory(-n)} style={{
+                  aspectRatio: "1/1", borderRadius: "50%",
                   background: active ? "#ef4444" : "#0b1320",
                   border: `1px solid ${active ? "#ef4444" : "#1a2535"}`,
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 8, color: active ? "#000" : "#2a3a52", fontWeight: 700,
-                  maxWidth: 24,
+                  fontSize: 14, color: active ? "#000" : "#2a3a52", fontWeight: 700,
+                  cursor: onChangeMemory ? "pointer" : "default",
+                  width: "100%",
                 }}>{n}</div>
               );
             })}
@@ -1880,45 +2131,8 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
               </div>
             )}
 
-        {/* Security：枚数に応じて縦積み */}
-        <div style={{
-          display: "flex", flexDirection: "column", gap: 3,
-          width: 80, flexShrink: 0,
-        }}>
-          <div style={{ fontSize: 9, color: "#ef4444", fontWeight: 700, letterSpacing: 1 }}>
-            Security
-            <span style={{ marginLeft: 4, fontSize: 10 }}>({secCards.length})</span>
-          </div>
-          {secCards.length === 0 ? (
-            /* 0枚：空枠を1つ表示 */
-            <div style={{
-              flex: 1, background: "#090f1e",
-              border: "1px solid #1a2535",
-              borderRadius: 4, padding: "3px 5px",
-              display: "flex", alignItems: "center", minHeight: 24,
-            }}>
-              <span style={{ fontSize: 8, color: "#1a2535" }}>—</span>
-            </div>
-          ) : (
-            /* 枚数分のカードを縦積み（上が最後に追加されたカード） */
-            [...secCards].reverse().map((card, i) => {
-              const _isNew = isNew("security", card);
-              return (
-                <div key={i} style={{
-                  background: _isNew ? "#ef444430" : "#ef444415",
-                  border: `1px solid ${_isNew ? "#ef4444" : "#ef444455"}`,
-                  borderRadius: 4, padding: "3px 5px",
-                  display: "flex", alignItems: "center",
-                  minHeight: 22,
-                }}>
-                  <span style={{ fontSize: 9, color: "#ef4444", wordBreak: "break-all", lineHeight: 1.3, fontWeight: _isNew ? 700 : 400 }}>
-                    {card}{_isNew && <span style={{ fontSize: 7, marginLeft: 2 }}>★</span>}
-                  </span>
-                </div>
-              );
-            })
-          )}
-        </div>
+        {/* Security */}
+        <ZoneBox label={`Security (${secCards.length})`} zoneKey="security" color="#ef4444" style={{ width: 80, flexShrink: 0 }} />
 
         {/* Battle area：中央、大きく */}
         <ZoneBox
@@ -1942,40 +2156,7 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
       <div style={{ display: "flex", gap: 6, flex: 2 }}>
 
         {/* 育成エリア */}
-        <div style={{
-          background: "#090f1e",
-          border: "1px solid #4a9eff66",
-          borderRadius: 6, padding: "6px 8px",
-          display: "flex", flexDirection: "column", gap: 4,
-          width: 160, flexShrink: 0,
-        }}>
-          <div style={{ fontSize: 9, color: "#4a9eff", fontWeight: 700, letterSpacing: 1 }}>
-            育成エリア / Raising area
-          </div>
-          <div style={{ display: "flex", gap: 4, flex: 1 }}>
-            {/* Digitamaスロット */}
-            <div style={{
-              flex: 1, background: "#0b1a2e",
-              border: "1px solid #4a9eff44",
-              borderRadius: 4, padding: "4px",
-              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2,
-            }}>
-              <span style={{ fontSize: 8, color: "#4a9eff88" }}>Digitama</span>
-            </div>
-            {/* 育成カードスロット */}
-            <div style={{
-              flex: 1, background: "#090f1e",
-              border: "1px solid #4a9eff44",
-              borderRadius: 4, padding: "4px",
-              display: "flex", flexWrap: "wrap", gap: 2, alignContent: "flex-start",
-            }}>
-              {(z.breeding || []).length === 0
-                ? <span style={{ fontSize: 8, color: "#2a3a52", fontStyle: "italic" }}>{t.none_label || "なし"}</span>
-                : (z.breeding || []).map((card, i) => <CardChip key={i} card={card} zoneKey="breeding" color="#4a9eff" />)
-              }
-            </div>
-          </div>
-        </div>
+        <ZoneBox label={t.zone_breeding || "育成エリア"} zoneKey="breeding" color="#4a9eff" style={{ width: 160, flexShrink: 0 }} />
 
         {/* 手札 */}
         <ZoneBox label={t.zone_hand || "手札"} zoneKey="hand" color="#22c55e" style={{ flex: 1 }} />
@@ -2003,11 +2184,28 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
 // ============================================================
 // BOARD VIEW MODAL
 // ============================================================
-function BoardViewModal({ boardViewNodeId, setBoardViewNodeId, setBoardView, nodes, selectedNode, t, onUpdateNode }) {
+
+function BoardViewModal({ boardViewNodeId, setBoardViewNodeId, setBoardView, nodes, selectedNode, t, onUpdateNode, onUndo, onAddChild }) {
   const [childModal, setChildModal] = useState(false);
+  const [moveTarget, setMoveTarget] = useState({ mode: "move", fromKey: null, card: null });
+  const [stackModal, setStackModal] = useState(null);
+  const [expandedItems, setExpandedItems] = useState({}); // `${key}:${itemIdx}` -> bool
+  const toggleExpanded = (key, itemIdx) =>
+    setExpandedItems(prev => ({ ...prev, [`${key}:${itemIdx}`]: !prev[`${key}:${itemIdx}`] }));
+  const [moveStackModal, setMoveStackModal] = useState(null);
+  const [arrowMode, setArrowMode] = useState(false);
+  const zoneRefs = useRef({});
+
   const bvNode = boardViewNodeId ? nodes[boardViewNodeId] : selectedNode;
   if (!bvNode) return null;
   const bvParent = bvNode.parentId ? nodes[bvNode.parentId] : null;
+  const zones = bvNode.meta.zones || {};
+
+  const updateZones = (newZones) => {
+    const next = JSON.parse(JSON.stringify(bvNode));
+    next.meta.zones = newZones;
+    onUpdateNode && onUpdateNode(next);
+  };
 
   const toggleCardState = (key, card) => {
     const cs = JSON.parse(JSON.stringify(bvNode.meta.cardStates || {}));
@@ -2016,6 +2214,49 @@ function BoardViewModal({ boardViewNodeId, setBoardViewNodeId, setBoardView, nod
     const next = JSON.parse(JSON.stringify(bvNode));
     next.meta.cardStates = cs;
     onUpdateNode && onUpdateNode(next);
+  };
+
+  // 親ノードとの差分からカードの移動を検出（スタック内含む）
+  const detectMoves = () => {
+    if (!bvParent) return [];
+    const moves = [];
+    const parentZones = bvParent.meta.zones || {};
+    const currentZones = bvNode.meta.zones || {};
+
+    // 親の全カードのゾーンを記録（同名カードは出現順にインデックス付き）
+    const parentCardList = {}; // card -> [{key, stackIdx, itemIdx}]
+    ZONE_KEYS.forEach(key => {
+      (parentZones[key] || []).forEach((item, itemIdx) => {
+        const stack = Array.isArray(item) ? item : [item];
+        stack.forEach((card, stackIdx) => {
+          if (!card) return;
+          if (!parentCardList[card]) parentCardList[card] = [];
+          parentCardList[card].push({ key, stackIdx, itemIdx });
+        });
+      });
+    });
+
+    // 現在の全カードと比較
+    const usedParent = {}; // card -> 使用済みインデックス
+    ZONE_KEYS.forEach(key => {
+      (currentZones[key] || []).forEach((item, itemIdx) => {
+        const stack = Array.isArray(item) ? item : [item];
+        stack.forEach((card, stackIdx) => {
+          if (!card) return;
+          const candidates = parentCardList[card] || [];
+          if (!usedParent[card]) usedParent[card] = 0;
+          const candidate = candidates[usedParent[card]];
+          if (candidate) {
+            usedParent[card]++;
+            if (candidate.key !== key) {
+              moves.push({ card, from: candidate.key, to: key });
+            }
+          }
+          // 親にいなかった新登場カードは無視
+        });
+      });
+    });
+    return moves;
   };
 
   const goParent = () => { if (bvNode.parentId) setBoardViewNodeId(bvNode.parentId); };
@@ -2028,6 +2269,7 @@ function BoardViewModal({ boardViewNodeId, setBoardViewNodeId, setBoardView, nod
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000c", zIndex: 500, display: "flex", flexDirection: "column" }}>
       <div style={{ flex: 1, background: "#060c18", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+
         {/* ヘッダー */}
         <div style={{ padding: "10px 16px", background: "#0b1320", borderBottom: "1px solid #1a2535", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
           <button onClick={() => { setBoardView(false); setBoardViewNodeId(null); }} style={{
@@ -2038,6 +2280,27 @@ function BoardViewModal({ boardViewNodeId, setBoardViewNodeId, setBoardView, nod
           <span style={{ fontSize: 13, color: "#4a9eff", fontWeight: 700, fontFamily: "monospace", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             🎴 {getNodeLabel(bvNode.meta.label, t)}
           </span>
+          <button onClick={() => setArrowMode(v => !v)} style={{
+            background: arrowMode ? "#f59e0b22" : "none",
+            border: `1px solid ${arrowMode ? "#f59e0b" : "#2a3a52"}`,
+            color: arrowMode ? "#f59e0b" : "#7a90a8",
+            cursor: "pointer", fontSize: 13, fontFamily: "monospace", fontWeight: 700,
+            padding: "5px 10px", borderRadius: 5, flexShrink: 0,
+          }}>→</button>
+          <button onClick={() => {
+            if (!onAddChild) return;
+            const newId = onAddChild(bvNode.id);
+            if (newId) setBoardViewNodeId(newId);
+          }} style={{
+            background: "#22c55e22", border: "1px solid #22c55e66", color: "#22c55e",
+            cursor: "pointer", fontSize: 13, fontFamily: "monospace", fontWeight: 700,
+            padding: "5px 10px", borderRadius: 5, flexShrink: 0,
+          }}>＋</button>
+          <button onClick={onUndo} style={{
+            background: "none", border: "1px solid #2a3a52", color: "#7a90a8",
+            cursor: "pointer", fontSize: 13, fontFamily: "monospace", fontWeight: 700,
+            padding: "5px 10px", borderRadius: 5, flexShrink: 0,
+          }}>↩</button>
         </div>
         {/* 前後移動 */}
         <div style={{ display: "flex", gap: 6, padding: "8px 16px", background: "#0b1320", borderBottom: "1px solid #1a2535", flexShrink: 0 }}>
@@ -2059,13 +2322,188 @@ function BoardViewModal({ boardViewNodeId, setBoardViewNodeId, setBoardView, nod
           </div>
         )}
         {/* 盤面 */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "16px", boxSizing: "border-box" }}>
-          <BoardLayout zones={bvNode.meta.zones || {}} parentZones={bvParent?.meta?.zones} t={t} state={bvNode.state || {}} parentState={bvParent?.state || {}} cardStates={bvNode.meta.cardStates || {}} onToggleCardState={toggleCardState} note={bvNode.meta.note} />
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px", boxSizing: "border-box", position: "relative" }}>
+          <BoardLayout
+            zones={bvNode.meta.zones || {}}
+            parentZones={bvParent?.meta?.zones}
+            t={t}
+            state={bvNode.state || {}}
+            parentState={bvParent?.state || {}}
+            cardStates={bvNode.meta.cardStates || {}}
+            onToggleCardState={toggleCardState}
+            note={bvNode.meta.note}
+            onChangeZones={updateZones}
+            moveTarget={moveTarget}
+            setMoveTarget={setMoveTarget}
+            stackModal={stackModal}
+            setStackModal={setStackModal}
+            moveStackModal={moveStackModal}
+            setMoveStackModal={setMoveStackModal}
+            onChangeMemory={(v) => {
+              const next = JSON.parse(JSON.stringify(bvNode));
+              next.state.memory = v;
+              onUpdateNode && onUpdateNode(next);
+            }}
+            onZoneRef={(key, el) => { zoneRefs.current[key] = el; }}
+          />
+          {/* stackModal / moveStackModal をBoardView上でも表示 */}
+          {moveStackModal && (
+            <div style={{ position: "fixed", inset: 0, background: "#000b", zIndex: 600, display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+              onClick={() => { setMoveStackModal(null); setMoveTarget({ mode: "move", fromKey: null, card: null }); }}>
+              <div onClick={e => e.stopPropagation()} style={{ background: "#0f1a28", border: "1px solid #4a9eff55", borderRadius: "12px 12px 0 0", padding: "16px 16px 32px", width: "100%", maxWidth: 480, display: "flex", flexDirection: "column", gap: 10, fontFamily: "monospace" }}>
+                <div style={{ fontSize: 12, color: "#7a90a8" }}>
+                  <span style={{ color: "#4a9eff", fontWeight: 700 }}>「{moveStackModal.card}」</span>（スタック{moveStackModal.stack.length}枚）をどう移動しますか？
+                </div>
+                <div style={{ fontSize: 10, color: "#4a6080" }}>スタック：{moveStackModal.stack.join(" → ")}</div>
+                <button onClick={() => {
+                  const { stack, fromKey, fromItemIdx, toKey } = moveStackModal;
+                  const z = JSON.parse(JSON.stringify(zones));
+                  const fromArr = [...(z[fromKey] || [])]; fromArr.splice(fromItemIdx, 1); z[fromKey] = fromArr;
+                  const tArr = Array.isArray(z[toKey]) ? [...z[toKey]] : []; tArr.push(stack.length === 1 ? stack[0] : stack); z[toKey] = tArr;
+                  updateZones(z); setMoveStackModal(null); setMoveTarget({ mode: "move", fromKey: null, card: null });
+                }} style={{ padding: "12px 0", borderRadius: 6, cursor: "pointer", background: "#f59e0b18", border: "1px solid #f59e0b66", color: "#f59e0b", fontSize: 13, fontWeight: 700 }}>
+                  スタックごと移動（{moveStackModal.stack.join("→")}）
+                </button>
+                <button onClick={() => {
+                  const { card, stack, fromKey, fromItemIdx, toKey } = moveStackModal;
+                  const z = JSON.parse(JSON.stringify(zones));
+                  const st = [...stack]; st.shift(); z[fromKey][fromItemIdx] = st.length === 1 ? st[0] : st;
+                  const tArr = Array.isArray(z[toKey]) ? [...z[toKey]] : []; tArr.push(card); z[toKey] = tArr;
+                  updateZones(z); setMoveStackModal(null); setMoveTarget({ mode: "move", fromKey: null, card: null });
+                }} style={{ padding: "12px 0", borderRadius: 6, cursor: "pointer", background: "#4a9eff18", border: "1px solid #4a9eff66", color: "#4a9eff", fontSize: 13, fontWeight: 700 }}>
+                  「{moveStackModal.card}」（一番上）だけ移動
+                </button>
+                <button onClick={() => { setMoveStackModal(null); setMoveTarget({ mode: "move", fromKey: null, card: null }); }} style={{ padding: "8px 0", borderRadius: 6, cursor: "pointer", background: "none", border: "1px solid #2a3a52", color: "#4a6080", fontSize: 12 }}>キャンセル</button>
+              </div>
+            </div>
+          )}
+          {stackModal && (() => {
+            const { card, fromKey, fromItemIdx, fromSubIdx, targetCard, targetKey, targetItemIdx } = stackModal;
+            const isSelf = fromKey === targetKey && fromItemIdx === targetItemIdx;
+            const srcItem = zones[fromKey]?.[fromItemIdx];
+            const srcStack = Array.isArray(srcItem) ? srcItem : [srcItem];
+
+            const doMove = (type) => {
+              const z = JSON.parse(JSON.stringify(zones));
+              let drawIncrement = 0;
+              if (isSelf) {
+                const st = Array.isArray(z[fromKey][fromItemIdx]) ? [...z[fromKey][fromItemIdx]] : [z[fromKey][fromItemIdx]];
+                if (type === "top_out") { const p = st.shift(); z[fromKey][fromItemIdx] = st.length === 1 ? st[0] : st; z[fromKey] = [...z[fromKey], p]; }
+                else if (type === "rotate") { const p = st.shift(); st.push(p); z[fromKey][fromItemIdx] = st.length === 1 ? st[0] : st; }
+              } else {
+                const removeSrc = () => {
+                  if (fromSubIdx !== undefined) {
+                    const fs = Array.isArray(z[fromKey][fromItemIdx]) ? [...z[fromKey][fromItemIdx]] : [z[fromKey][fromItemIdx]];
+                    fs.splice(fromSubIdx, 1); z[fromKey][fromItemIdx] = fs.length === 1 ? fs[0] : fs;
+                  } else {
+                    const fa = [...(z[fromKey] || [])];
+                    const adj = (fromKey === targetKey && fromItemIdx < targetItemIdx) ? targetItemIdx - 1 : targetItemIdx;
+                    fa.splice(fromItemIdx, 1); z[fromKey] = fa;
+                    return adj;
+                  }
+                  return targetItemIdx;
+                };
+                const adjIdx = removeSrc();
+                const tArr = z[targetKey] || [];
+                const tItem = tArr[adjIdx];
+                const tStack = Array.isArray(tItem) ? tItem : [tItem];
+                if (type === "on_top") {
+                  tArr[adjIdx] = [card, ...tStack];
+                  if (fromKey === "hand" && targetKey === "main") drawIncrement = 1;
+                }
+                else if (type === "on_bottom") tArr[adjIdx] = [...tStack, card];
+                else if (type === "stack_on_bottom") {
+                  tArr[adjIdx] = [...tStack, ...srcStack];
+                }
+                else if (type === "zone_stack") { const ta = Array.isArray(z[targetKey]) ? [...z[targetKey]] : []; ta.push(srcStack.length === 1 ? srcStack[0] : srcStack); z[targetKey] = ta; updateZones(z); setStackModal(null); setMoveTarget({ mode: "move", fromKey: null, card: null }); return; }
+                else if (type === "zone_top") { const ta = Array.isArray(z[targetKey]) ? [...z[targetKey]] : []; ta.push(card); z[targetKey] = ta; updateZones(z); setStackModal(null); setMoveTarget({ mode: "move", fromKey: null, card: null }); return; }
+                z[targetKey] = tArr;
+              }
+              // zonesと必要ならstate.myHandも同時更新
+              const next = JSON.parse(JSON.stringify(bvNode));
+              next.meta.zones = z;
+              if (drawIncrement) next.state.myHand = (next.state.myHand ?? 0) + drawIncrement;
+              onUpdateNode && onUpdateNode(next);
+              setStackModal(null); setMoveTarget({ mode: "move", fromKey: null, card: null });
+            };
+
+            const hasStack = fromSubIdx === undefined && srcStack.length > 1;
+            const targetZoneLabel = t[ZONE_LABEL_KEYS[targetKey]] || targetKey;
+
+            return (
+              <div style={{ position: "fixed", inset: 0, background: "#000b", zIndex: 600, display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+                onClick={() => { setStackModal(null); setMoveTarget({ mode: "move", fromKey: null, card: null }); }}>
+                <div onClick={e => e.stopPropagation()} style={{ background: "#0f1a28", border: "1px solid #4a9eff55", borderRadius: "12px 12px 0 0", padding: "16px 16px 32px", width: "100%", maxWidth: 480, display: "flex", flexDirection: "column", gap: 10, fontFamily: "monospace" }}>
+                  <div style={{ fontSize: 12, color: "#7a90a8" }}>
+                    {isSelf
+                      ? <><span style={{ color: "#4a9eff", fontWeight: 700 }}>「{card}」</span> のスタックを操作：</>
+                      : <><span style={{ color: "#4a9eff", fontWeight: 700 }}>「{card}」</span> を <span style={{ color: "#f59e0b", fontWeight: 700 }}>「{targetCard}」</span> に対して：</>
+                    }
+                  </div>
+                  {isSelf ? (<>
+                    <div style={{ fontSize: 10, color: "#4a6080" }}>スタック：{srcStack.join(" → ")}</div>
+                    <button onClick={() => { doMove("top_out"); }} style={{ padding: "12px 0", borderRadius: 6, cursor: "pointer", background: "#4a9eff18", border: "1px solid #4a9eff66", color: "#4a9eff", fontSize: 13, fontWeight: 700 }}>「{srcStack[0]}」を同エリアに単体で出す</button>
+                    {srcStack.length > 1 && <button onClick={() => { doMove("rotate"); }} style={{ padding: "12px 0", borderRadius: 6, cursor: "pointer", background: "#a855f718", border: "1px solid #a855f766", color: "#a855f7", fontSize: 13, fontWeight: 700 }}>「{srcStack[0]}」を一番下（「{srcStack[srcStack.length-1]}」の下）へ</button>}
+                  </>) : (<>
+                    <button onClick={() => doMove("on_top")} style={{ padding: "12px 0", borderRadius: 6, cursor: "pointer", background: "#4a9eff18", border: "1px solid #4a9eff66", color: "#4a9eff", fontSize: 13, fontWeight: 700 }}>「{targetCard}」の上に重ねる（進化）</button>
+                    <button onClick={() => doMove("on_bottom")} style={{ padding: "12px 0", borderRadius: 6, cursor: "pointer", background: "#a855f718", border: "1px solid #a855f766", color: "#a855f7", fontSize: 13, fontWeight: 700 }}>「{targetCard}」の下に入る（進化元）</button>
+                    {hasStack && <button onClick={() => doMove("stack_on_bottom")} style={{ padding: "12px 0", borderRadius: 6, cursor: "pointer", background: "#ec489918", border: "1px solid #ec489966", color: "#ec4899", fontSize: 13, fontWeight: 700 }}>スタックごと「{targetCard}」の下に入る（{srcStack.join("→")}）</button>}
+                    {hasStack && <button onClick={() => doMove("zone_stack")} style={{ padding: "12px 0", borderRadius: 6, cursor: "pointer", background: "#f59e0b18", border: "1px solid #f59e0b66", color: "#f59e0b", fontSize: 13, fontWeight: 700 }}>スタックごと{targetZoneLabel}に出す（{srcStack.join("→")}）</button>}
+                    <button onClick={() => doMove("zone_top")} style={{ padding: "12px 0", borderRadius: 6, cursor: "pointer", background: "#22c55e18", border: "1px solid #22c55e66", color: "#22c55e", fontSize: 13, fontWeight: 700 }}>「{card}」だけ{targetZoneLabel}に出す（重ねない）</button>
+                  </>)}
+                  <button onClick={() => { setStackModal(null); setMoveTarget({ mode: "move", fromKey: null, card: null }); }} style={{ padding: "8px 0", borderRadius: 6, cursor: "pointer", background: "none", border: "1px solid #2a3a52", color: "#4a6080", fontSize: 12 }}>キャンセル</button>
+                </div>
+              </div>
+            );
+          })()}
+          {/* 矢印オーバーレイ */}
+          {arrowMode && (() => {
+            const moves = detectMoves();
+            if (moves.length === 0) return null;
+            const ZONE_COLORS_MAP = { hand: "#22c55e", breeding: "#4a9eff", main: "#f59e0b", trash: "#94a3b8", deck: "#a855f7", security: "#ef4444" };
+            return (
+              <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 550 }}>
+                <svg style={{ width: "100%", height: "100%" }}>
+                  <defs>
+                    {moves.map((_, i) => (
+                      <marker key={i} id={`arrow-${i}`} markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                        <path d="M0,0 L0,6 L8,3 z" fill="#f59e0b" />
+                      </marker>
+                    ))}
+                  </defs>
+                  {moves.map((m, i) => {
+                    const fromEl = zoneRefs.current[m.from];
+                    const toEl = zoneRefs.current[m.to];
+                    if (!fromEl || !toEl) return null;
+                    const fr = fromEl.getBoundingClientRect();
+                    const tr = toEl.getBoundingClientRect();
+                    const x1 = fr.left + fr.width / 2;
+                    const y1 = fr.top + fr.height / 2;
+                    const x2 = tr.left + tr.width / 2;
+                    const y2 = tr.top + tr.height / 2;
+                    const color = ZONE_COLORS_MAP[m.from] || "#f59e0b";
+                    return (
+                      <g key={i}>
+                        <line x1={x1} y1={y1} x2={x2} y2={y2}
+                          stroke={color} strokeWidth="2.5" strokeOpacity="0.85"
+                          strokeDasharray="6 3" markerEnd={`url(#arrow-${i})`} />
+                        <text x={(x1+x2)/2} y={(y1+y2)/2 - 6}
+                          textAnchor="middle" fontSize="11" fill={color}
+                          style={{ fontFamily: "monospace", fontWeight: 700 }}>{m.card}</text>
+                      </g>
+                    );
+                  })}
+                </svg>
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>
   );
 }
+
+
 
 // ============================================================
 // DETAIL PANEL
@@ -2219,6 +2657,12 @@ function NodeDetailPanel({ node, parentNode, onUpdate, onClose, onDelete, onAddC
                 whiteSpace: "nowrap",
               }}>🗑 ノードの削除</button>
             )}
+            <button onClick={() => { setBoardViewNodeId(node.id); setBoardView(true); }} style={{
+              background: "#f59e0b18", border: "1px solid #f59e0b66", color: "#f59e0b",
+              padding: "6px 10px", borderRadius: 4, cursor: "pointer",
+              fontSize: 11, fontFamily: "monospace", fontWeight: 700,
+              whiteSpace: "nowrap",
+            }}>🎴 盤面ビュー</button>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <button onClick={guard(() => onAddChild(node.id))} style={{
@@ -2325,8 +2769,18 @@ function NodeDetailPanel({ node, parentNode, onUpdate, onClose, onDelete, onAddC
               <button onClick={() => {
                 if (selectedCards.length === 0) return;
                 const newZones = JSON.parse(JSON.stringify(node.meta.zones || {}));
-                selectedCards.forEach(({ key, card }) => {
-                  newZones[key] = (newZones[key] || []).filter(c => c !== card);
+                // subIdxありとなしを分けて処理、大きい順に削除
+                const withSub = selectedCards.filter(s => s.subIdx !== undefined)
+                  .sort((a, b) => b.subIdx - a.subIdx);
+                const withoutSub = selectedCards.filter(s => s.subIdx === undefined)
+                  .sort((a, b) => b.itemIdx - a.itemIdx);
+                withSub.forEach(({ key, itemIdx, subIdx }) => {
+                  const stack = Array.isArray(newZones[key][itemIdx]) ? [...newZones[key][itemIdx]] : [newZones[key][itemIdx]];
+                  stack.splice(subIdx, 1);
+                  newZones[key][itemIdx] = stack.length === 1 ? stack[0] : stack;
+                });
+                withoutSub.forEach(({ key, itemIdx }) => {
+                  newZones[key].splice(itemIdx, 1);
                 });
                 update("meta.zones", newZones);
                 setSelectedCards([]);
@@ -2517,7 +2971,7 @@ function NodeDetailPanel({ node, parentNode, onUpdate, onClose, onDelete, onAddC
 
         <Sec title={t.phase_label || "フェイズ"}>
           <select
-            value={node.state.phase || "main"}
+            value={PHASES.includes(node.state?.phase) ? node.state.phase : "main"}
             onChange={e => update("state.phase", e.target.value)}
             style={{
               width: "100%", background: "#0b1320", border: "1px solid #4a9eff44",
@@ -2711,9 +3165,39 @@ export default function DigiTree() {
   }, []);
 
   useEffect(() => {
+  // カード名の末尾スペースをtrimしてクリーンアップ
+  // 括弧形式スタック "A（B（C））" を配列 ["A","B","C"] に変換
+  const parseStackStr = (s) => {
+    const parts = [];
+    let cur = s.trim();
+    while (cur) {
+      const m = cur.match(/^(.+?)（(.+)）$/);
+      if (!m) { parts.push(cur); break; }
+      parts.push(m[1].trim());
+      cur = m[2].trim();
+    }
+    return parts.length > 1 ? parts : parts[0] || s;
+  };
+
+  const cleanupTree = (tree) => {
+    if (!tree?.nodes) return tree;
+    const nodes = JSON.parse(JSON.stringify(tree.nodes));
+    Object.values(nodes).forEach(node => {
+      if (!node.meta?.zones) return;
+      Object.keys(node.meta.zones).forEach(key => {
+        node.meta.zones[key] = (node.meta.zones[key] || []).map(item => {
+          if (Array.isArray(item)) return item.map(c => c.trim());
+          if (typeof item === 'string') return parseStackStr(item.trim());
+          return item;
+        });
+      });
+    });
+    return { ...tree, nodes };
+  };
+
     idbGet('digitree_tree').then(saved => {
       if (saved && saved.nodes && saved.rootNodeId) {
-        setTree(saved);
+        setTree(cleanupTree(saved));
         idbSet('digitree_tree_bak', saved).catch(() => {});
       } else {
         const sources = ['digitree_tree_bak', 'digitree_tree'];
@@ -2723,7 +3207,7 @@ export default function DigiTree() {
             if (ls) {
               const parsed = JSON.parse(ls);
               if (parsed && parsed.nodes && parsed.rootNodeId) {
-                setTree(parsed);
+                setTree(cleanupTree(parsed));
                 idbSet('digitree_tree', parsed).catch(() => {});
                 break;
               }
@@ -2739,7 +3223,7 @@ export default function DigiTree() {
           const ls = localStorage.getItem(key);
           if (ls) {
             const parsed = JSON.parse(ls);
-            if (parsed && parsed.nodes && parsed.rootNodeId) { setTree(parsed); break; }
+            if (parsed && parsed.nodes && parsed.rootNodeId) { setTree(cleanupTree(parsed)); break; }
           }
         } catch {}
       }
@@ -2764,7 +3248,6 @@ export default function DigiTree() {
     const prev = historyRef.current[historyRef.current.length - 1];
     historyRef.current = historyRef.current.slice(0, -1);
     setTree(prev);
-    setSelectedId(null);
   }, []);
 
   const applyGlobalShowZones = useCallback((show) => {
@@ -2975,6 +3458,7 @@ export default function DigiTree() {
       }
     }));
     setSelectedId(n.id);
+    return n.id;
   }, [nodes, turnIncrement, getSubtreeMaxY, findFreeY, settings, estimateNodeHeight, t]);
 
   const autoLayout = useCallback(() => {
@@ -3228,7 +3712,7 @@ export default function DigiTree() {
       const nd = nodes[id];
       const parent = idx > 0 ? nodes[route[idx - 1]] : null;
       const mem = nd.state.memory ?? 0;
-      const phase = phaseLabels[nd.state.phase || "main"] || "メインフェイズ";
+      const phase = phaseLabels[PHASES.includes(nd.state?.phase) ? nd.state.phase : "main"] || "メインフェイズ";
       const isWin = (nd.state.oppSecurity ?? 0) < 0;
       const label = nd.meta.label === "INITIAL_BOARD_PLACEHOLDER" ? "開始盤面" : nd.meta.label;
       const cs = nd.meta.cardStates || {};
@@ -3543,7 +4027,7 @@ ${nodeHTML}
             flexShrink: 0,
           }}
         >
-          🎴 {selectedId ? `「${getNodeLabel(nodes[selectedId]?.meta?.label, t)}」の盤面` : "盤面"}
+          🎴 選択したノードの盤面ビュー
         </button>
       </div>
 
@@ -3742,6 +4226,8 @@ ${nodeHTML}
           selectedNode={selectedNode}
           t={t}
           onUpdateNode={updateNode}
+          onUndo={undo}
+          onAddChild={addChild}
         />
       )}
 
