@@ -1845,7 +1845,7 @@ function ZoneEditor({ zones = {}, onChange, hiddenZones = [], onToggleHidden, pa
 // ============================================================
 // BOARD LAYOUT VIEW（プレイシート風）
 // ============================================================
-function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentState = {}, cardStates = {}, onToggleCardState = null, note = undefined, onChangeZones = null, moveTarget = null, setMoveTarget = null, stackModal = null, setStackModal = null, moveStackModal = null, setMoveStackModal = null, onChangeMemory = null, onZoneRef = null }) {
+function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentState = {}, cardStates = {}, onToggleCardState = null, note = undefined, onChangeZones = null, moveTarget = null, setMoveTarget = null, stackModal = null, setStackModal = null, moveStackModal = null, setMoveStackModal = null, onChangeMemory = null, onZoneRef = null, nodeName = null }) {
   const z = zones;
   const [expandedMap, setExpandedMap] = React.useState({});
   const toggleExpanded = (zoneKey, itemIdx) => {
@@ -1857,6 +1857,7 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
   const [dragPos, setDragPos] = React.useState({ x: 0, y: 0 });
   const pendingDrag = React.useRef(null); // { startX, startY, info }
   const isDragging = React.useRef(false);
+  const justDropped = React.useRef(false); // ドラッグ完了直後のonClickを無視
 
   const isNew = (key, card) => !((parentZones[key] || []).includes(card));
 
@@ -1912,6 +1913,7 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
         ref={el => onZoneRef && onZoneRef(zoneKey, el)}
         data-zonedrop={zoneKey}
         onClick={() => {
+        if (justDropped.current) return;
         if (!onChangeZones || !moveTarget?.card) return;
         const canMove = moveTarget.fromKey !== zoneKey || moveTarget.subIdx !== undefined;
         if (!canMove) return;
@@ -1993,6 +1995,7 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
                           }}
                           onClick={e => {
                           e.stopPropagation();
+                          if (justDropped.current) return;
                           if (!onChangeZones || !setMoveTarget) return;
                           if (!moveTarget?.card) {
                             setMoveTarget({ mode: "move", fromKey: zoneKey, card, itemIdx: i });
@@ -2098,8 +2101,8 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
     return cur - par;
   };
 
-  const phaseKey = PHASES.includes(state?.phase) ? state.phase : "main";
-  const phaseName = t["ph_" + phaseKey] || phaseKey;
+  const phaseKey = PHASES.includes(state?.phase) ? state.phase : null;
+  const phaseName = phaseKey ? (t["ph_" + phaseKey] || phaseKey) : null;
 
   return (
     <>
@@ -2129,6 +2132,8 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
           setDragOverZone(null);
           pendingDrag.current = null;
           isDragging.current = false;
+          justDropped.current = true;
+          setTimeout(() => { justDropped.current = false; }, 200);
           // 少し遅延させてゴーストが消えてからドロップ判定
           requestAnimationFrame(() => {
             const el = document.elementFromPoint(e.clientX, e.clientY);
@@ -2165,16 +2170,26 @@ function BoardLayout({ zones = {}, parentZones = {}, t = {}, state = {}, parentS
       maxWidth: 900, margin: "0 auto",
     }}>
 
-      {/* フェイズ表示 */}
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "center",
-        background: "#4a9eff18", border: "1px solid #4a9eff44",
-        borderRadius: 6, padding: "5px 0", flexShrink: 0,
-      }}>
-        <span style={{ fontSize: 12, color: "#4a9eff", fontWeight: 700, letterSpacing: 2 }}>
-          {phaseName}
-        </span>
+      {/* ノード名 + フェイズ */}
+      {(nodeName || phaseName) && (
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+        {nodeName && (
+          <div style={{
+            flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            background: "#4a9eff18", border: "1px solid #4a9eff44",
+            borderRadius: 6, padding: "4px 10px",
+            fontSize: 12, color: "#dde4f0", fontWeight: 700, fontFamily: "monospace",
+          }}>{nodeName}</div>
+        )}
+        {phaseName && (
+          <div style={{
+            background: "#4a9eff18", border: "1px solid #4a9eff44",
+            borderRadius: 6, padding: "4px 10px", flexShrink: 0,
+            fontSize: 10, color: "#4a9eff", fontWeight: 700, letterSpacing: 1, fontFamily: "monospace",
+          }}>{phaseName}</div>
+        )}
       </div>
+      )}
 
       {/* 1行目：メモリーゲージ */}
       <div style={{
@@ -2438,9 +2453,6 @@ function BoardViewModal({ boardViewNodeId, setBoardViewNodeId, setBoardView, nod
             cursor: "pointer", fontSize: 13, fontFamily: "monospace", fontWeight: 700,
             padding: "5px 10px", borderRadius: 5, flexShrink: 0,
           }}>戻る</button>
-          <span style={{ fontSize: 13, color: "#4a9eff", fontWeight: 700, fontFamily: "monospace", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            🎴 {getNodeLabel(bvNode.meta.label, t)}
-          </span>
           <button onClick={() => setArrowMode(v => !v)} style={{
             background: arrowMode ? "#f59e0b22" : "none",
             border: `1px solid ${arrowMode ? "#f59e0b" : "#2a3a52"}`,
@@ -2505,6 +2517,7 @@ function BoardViewModal({ boardViewNodeId, setBoardViewNodeId, setBoardView, nod
               next.state.memory = v;
               onUpdateNode && onUpdateNode(next);
             }}
+            nodeName={getNodeLabel(bvNode.meta.label, t)}
             onZoneRef={(key, el) => { zoneRefs.current[key] = el; }}
           />
           {/* stackModal / moveStackModal をBoardView上でも表示 */}
@@ -2621,18 +2634,26 @@ function BoardViewModal({ boardViewNodeId, setBoardViewNodeId, setBoardView, nod
           {arrowMode && (() => {
             const moves = detectMoves();
             if (moves.length === 0) return null;
+            // 同じfrom→toは最初の1件（=スタックの一番上）だけ表示
+            const seen = new Set();
+            const filtered = moves.filter(m => {
+              const key = `${m.from}→${m.to}`;
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            });
             const ZONE_COLORS_MAP = { hand: "#22c55e", breeding: "#4a9eff", main: "#f59e0b", trash: "#94a3b8", deck: "#a855f7", security: "#ef4444" };
             return (
               <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 550 }}>
                 <svg style={{ width: "100%", height: "100%" }}>
                   <defs>
-                    {moves.map((_, i) => (
+                    {filtered.map((_, i) => (
                       <marker key={i} id={`arrow-${i}`} markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
                         <path d="M0,0 L0,6 L8,3 z" fill="#f59e0b" />
                       </marker>
                     ))}
                   </defs>
-                  {moves.map((m, i) => {
+                  {filtered.map((m, i) => {
                     const fromEl = zoneRefs.current[m.from];
                     const toEl = zoneRefs.current[m.to];
                     if (!fromEl || !toEl) return null;
@@ -2648,9 +2669,18 @@ function BoardViewModal({ boardViewNodeId, setBoardViewNodeId, setBoardView, nod
                         <line x1={x1} y1={y1} x2={x2} y2={y2}
                           stroke={color} strokeWidth="2.5" strokeOpacity="0.85"
                           strokeDasharray="6 3" markerEnd={`url(#arrow-${i})`} />
-                        <text x={(x1+x2)/2} y={(y1+y2)/2 - 6}
-                          textAnchor="middle" fontSize="11" fill={color}
-                          style={{ fontFamily: "monospace", fontWeight: 700 }}>{m.card}</text>
+                        {(() => {
+                          const tw = m.card.length * 13 + 20;
+                          const cx = (x1+x2)/2, cy = (y1+y2)/2;
+                          return (<>
+                            <rect x={cx - tw/2} y={cy - 14} width={tw} height={20} rx={4}
+                              fill="#060c18" fillOpacity="1"
+                              stroke={color} strokeWidth="1.5" />
+                            <text x={cx} y={cy - 1}
+                              textAnchor="middle" fontSize="11" fill={color}
+                              style={{ fontFamily: "monospace", fontWeight: 700 }}>{m.card}</text>
+                          </>);
+                        })()}
                       </g>
                     );
                   })}
@@ -2955,14 +2985,6 @@ function NodeDetailPanel({ node, parentNode, onUpdate, onClose, onDelete, onAddC
                 🗑 {selectedCards.length > 0 ? `${selectedCards.length}枚削除` : "未選択"}
               </button>
             )}
-            <button onClick={openBoardView} style={{
-              background: "none",
-              border: "1px solid #2a3a52",
-              color: "#4a6080",
-              borderRadius: 5, padding: "5px 10px", cursor: "pointer",
-              fontSize: 11, fontFamily: "monospace", fontWeight: 700,
-              whiteSpace: "nowrap",
-            }}>🎴 盤面</button>
             <button onClick={() => {
               setRestMode(r => !r);
               setDeleteMode(false);
@@ -3132,8 +3154,8 @@ function NodeDetailPanel({ node, parentNode, onUpdate, onClose, onDelete, onAddC
 
         <Sec title={t.phase_label || "フェイズ"}>
           <select
-            value={PHASES.includes(node.state?.phase) ? node.state.phase : "main"}
-            onChange={e => update("state.phase", e.target.value)}
+            value={PHASES.includes(node.state?.phase) ? node.state.phase : ""}
+            onChange={e => update("state.phase", e.target.value || null)}
             style={{
               width: "100%", background: "#0b1320", border: "1px solid #4a9eff44",
               borderRadius: 6, padding: "10px 12px", color: "#4a9eff",
@@ -3142,6 +3164,7 @@ function NodeDetailPanel({ node, parentNode, onUpdate, onClose, onDelete, onAddC
               appearance: "auto",
             }}
           >
+            <option value="">— 選択なし —</option>
             {PHASES.map(ph => (
               <option key={ph} value={ph}>{getPhaseLabel(t, ph)}</option>
             ))}
