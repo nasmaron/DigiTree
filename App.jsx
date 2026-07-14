@@ -4105,11 +4105,16 @@ export default function DigiTree() {
     }).join("\n<!-- SLIDE -->\n");
 
     const slideItems = nodeHTML.split('\n<!-- SLIDE -->\n');
+    const n = slideItems.length;
+
     const slideDivs = slideItems.map((s, i) => {
-      // data-movesをslide divに移動
-      const movesMatch = s.match(/data-moves='([^']*?)'/);
-      const movesAttr = movesMatch ? ` data-moves='${movesMatch[1]}'` : '';
-      return `<div class="slide${i===0?" active":""}" id="slide-${i}"${movesAttr}>${s}</div>`;
+      const prev = i > 0 ? `<a href="#s${i-1}" class="btn-prev">← 前</a>` : `<span class="btn-prev disabled">← 前</span>`;
+      const next = i < n-1 ? `<a href="#s${i+1}" class="btn-next">次 →</a>` : `<span class="btn-next disabled">次 →</span>`;
+      return `<div class="slide" id="s${i}">
+  <div class="slide-counter">${i+1} / ${n}</div>
+  ${s}
+  <div class="nav">${prev}${next}</div>
+</div>`;
     }).join('\n');
 
     return `<!DOCTYPE html>
@@ -4119,99 +4124,24 @@ export default function DigiTree() {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${tree.title} - DigiTree</title>
 <style>
+  * { box-sizing: border-box; }
   body { background:#060c18; color:#dde4f0; font-family:monospace; margin:0; padding:0; }
-  .slide { display:none; padding:16px; max-width:480px; margin:0 auto; box-sizing:border-box; }
-  .slide.active { display:block; }
-  .nav { position:fixed; bottom:0; left:0; right:0; display:flex; gap:8px; padding:12px 16px; background:#060c18; border-top:1px solid #1a2535; box-sizing:border-box; z-index:100; }
-  .nav button { flex:1; padding:12px 0; border-radius:8px; font-family:monospace; font-size:15px; font-weight:700; cursor:pointer; border:none; }
+  .slide { display:none; min-height:100vh; padding:52px 16px 100px; max-width:480px; margin:0 auto; }
+  .slide:target { display:block; }
+  .slide:first-child { display:block; }
+  .slide:target ~ .slide:first-child { display:none; }
+  .title-bar { position:fixed; top:0; left:0; right:0; background:#060c18ee; border-bottom:1px solid #1a2535; padding:10px 16px; font-size:13px; color:#4a9eff; font-weight:700; z-index:100; }
+  .slide-counter { text-align:right; font-size:11px; color:#4a6080; margin-bottom:8px; }
+  .nav { position:fixed; bottom:0; left:0; right:0; display:flex; gap:8px; padding:12px 16px; background:#060c18; border-top:1px solid #1a2535; z-index:100; }
+  .btn-prev, .btn-next { flex:1; padding:14px 0; border-radius:8px; font-family:monospace; font-size:15px; font-weight:700; text-align:center; text-decoration:none; display:block; }
   .btn-prev { background:#1a2535; color:#7a90a8; }
   .btn-next { background:#4a9eff; color:#000; }
-  .btn-arrow { background:#1a2535; color:#7a90a8; flex:0.6; }
-  button:disabled { opacity:0.3; cursor:default; }
-  .counter { position:fixed; top:8px; right:12px; font-size:11px; color:#4a6080; font-family:monospace; }
-  .title-bar { position:fixed; top:0; left:0; right:0; background:#060c18dd; border-bottom:1px solid #1a2535; padding:8px 16px; font-size:13px; color:#4a9eff; font-weight:700; z-index:100; }
-  .content { padding-top:44px; padding-bottom:80px; }
+  .disabled { opacity:0.3; pointer-events:none; }
 </style>
 </head>
 <body>
 <div class="title-bar">🌳 ${tree.title}</div>
-<div class="counter"><span id="cur">1</span> / ${slideItems.length}</div>
-<div class="content">
 ${slideDivs}
-</div>
-<div class="nav">
-  <button class="btn-prev" id="prev" disabled>← 前</button>
-  <button class="btn-arrow" id="arrowBtn">→ 矢印</button>
-  <button class="btn-next" id="next"${slideItems.length<=1?" disabled":""}>次 →</button>
-</div>
-<svg id="arrowSvg" style="position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:200;display:none"></svg>
-<script>
-  var cur = 0;
-  var arrowOn = false;
-  var allSlides = document.querySelectorAll('.slide');
-  var zoneColors = {hand:"#22c55e",breeding:"#4a9eff",main:"#f59e0b",trash:"#94a3b8",deck:"#a855f7",security:"#ef4444"};
-
-  document.getElementById('prev').addEventListener('click', function(){ go(-1); });
-  document.getElementById('next').addEventListener('click', function(){ go(1); });
-  document.getElementById('arrowBtn').addEventListener('click', function(){ toggleArrow(); });
-
-  function go(d) {
-    allSlides[cur].classList.remove('active');
-    cur = Math.max(0, Math.min(allSlides.length-1, cur+d));
-    allSlides[cur].classList.add('active');
-    document.getElementById('cur').textContent = cur+1;
-    document.getElementById('prev').disabled = cur===0;
-    document.getElementById('next').disabled = cur===allSlides.length-1;
-    window.scrollTo(0,0);
-    if (arrowOn) drawArrows();
-    else clearArrows();
-  }
-
-  function toggleArrow() {
-    arrowOn = !arrowOn;
-    var btn = document.getElementById('arrowBtn');
-    btn.style.background = arrowOn ? '#f59e0b' : '#1a2535';
-    btn.style.color = arrowOn ? '#000' : '#7a90a8';
-    if (arrowOn) drawArrows(); else clearArrows();
-  }
-
-  function clearArrows() {
-    document.getElementById('arrowSvg').innerHTML = '';
-    document.getElementById('arrowSvg').style.display = 'none';
-  }
-
-  function drawArrows() {
-    var slide = allSlides[cur];
-    var inner = slide.querySelector('[data-moves]');
-    var movesAttr = (inner || slide).getAttribute('data-moves');
-    if (!movesAttr) { clearArrows(); return; }
-    var moves;
-    try { moves = JSON.parse(movesAttr); } catch(e) { clearArrows(); return; }
-    if (!moves.length) { clearArrows(); return; }
-    var svg = document.getElementById('arrowSvg');
-    svg.style.display = 'block';
-    var defs = '<defs>' + moves.map(function(m,i){
-      var c = zoneColors[m.from]||'#f59e0b';
-      return '<marker id="arr'+i+'" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="'+c+'"/></marker>';
-    }).join('') + '</defs>';
-    var lines = moves.map(function(m,i){
-      var fromEl = slide.querySelector('[data-zone="'+m.from+'"]');
-      var toEl = slide.querySelector('[data-zone="'+m.to+'"]');
-      if (!fromEl||!toEl) return '';
-      var fr = fromEl.getBoundingClientRect();
-      var tr = toEl.getBoundingClientRect();
-      var x1=fr.left+fr.width/2, y1=fr.top+fr.height/2;
-      var x2=tr.left+tr.width/2, y2=tr.top+tr.height/2;
-      var c = zoneColors[m.from]||'#f59e0b';
-      var tw = m.card.length*13+20;
-      var cx=(x1+x2)/2, cy=(y1+y2)/2;
-      return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+c+'" stroke-width="2.5" stroke-opacity="0.85" stroke-dasharray="6 3" marker-end="url(#arr'+i+')"/>'
-        +'<rect x="'+(cx-tw/2)+'" y="'+(cy-14)+'" width="'+tw+'" height="20" rx="4" fill="#060c18" stroke="'+c+'" stroke-width="1.5"/>'
-        +'<text x="'+cx+'" y="'+(cy-1)+'" text-anchor="middle" font-size="11" fill="'+c+'" font-family="monospace" font-weight="700">'+m.card+'</text>';
-    }).join('');
-    svg.innerHTML = defs+lines;
-  }
-</script>
 </body>
 </html>`;
   }, [nodes, tree.title]);
