@@ -3386,6 +3386,7 @@ export default function DigiTree() {
   }, []);
 
   useEffect(() => {
+    (async () => {
   // カード名の末尾スペースをtrimしてクリーンアップ
   // 括弧形式スタック "A（B（C））" を配列 ["A","B","C"] に変換
   const parseStackStr = (s) => {
@@ -3421,17 +3422,33 @@ export default function DigiTree() {
       const params = new URLSearchParams(location.search);
       const shareData = params.get('share');
       if (shareData) {
-        const json = decodeURIComponent(escape(atob(shareData)));
-        const parsed = JSON.parse(json);
+        let parsed = null;
+        // まずgzip解凍を試みる
+        try {
+          const bytes = Uint8Array.from(atob(decodeURIComponent(shareData)), c => c.charCodeAt(0));
+          const stream = new DecompressionStream('gzip');
+          const writer = stream.writable.getWriter();
+          writer.write(bytes);
+          writer.close();
+          const decompressed = await new Response(stream.readable).text();
+          parsed = JSON.parse(decompressed);
+        } catch {
+          // 失敗したら旧形式（Base64のみ）で試みる
+          try {
+            const json = decodeURIComponent(escape(atob(decodeURIComponent(shareData))));
+            parsed = JSON.parse(json);
+          } catch {}
+        }
         if (parsed && parsed.nodes && parsed.rootNodeId) {
           setTree(cleanupTree(parsed));
           setDbLoaded(true);
-          // URLからshareパラメータを消す
           history.replaceState(null, '', location.pathname);
           return;
         }
       }
-    } catch {}
+    } catch(e) {
+      console.warn('share param error:', e);
+    }
 
     idbGet('digitree_tree').then(saved => {
       if (saved && saved.nodes && saved.rootNodeId) {
@@ -3467,6 +3484,7 @@ export default function DigiTree() {
       }
       setDbLoaded(true);
     });
+    })();
   }, []);
   const [selectedId, setSelectedId] = useState(null);
   const blockActionsRef = useRef(false);
@@ -4122,24 +4140,28 @@ export default function DigiTree() {
 ${slideDivs}
 </div>
 <div class="nav">
-  <button class="btn-prev" id="prev" onclick="go(-1)" disabled>← 前</button>
-  <button class="btn-arrow" id="arrowBtn" onclick="toggleArrow()">→ 矢印</button>
-  <button class="btn-next" id="next" onclick="go(1)"${slideItems.length<=1?" disabled":""}>次 →</button>
+  <button class="btn-prev" id="prev" disabled>← 前</button>
+  <button class="btn-arrow" id="arrowBtn">→ 矢印</button>
+  <button class="btn-next" id="next"${slideItems.length<=1?" disabled":""}>次 →</button>
 </div>
 <svg id="arrowSvg" style="position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:200;display:none"></svg>
 <script>
   var cur = 0;
   var arrowOn = false;
-  var slides = document.querySelectorAll('.slide');
+  var allSlides = document.querySelectorAll('.slide');
   var zoneColors = {hand:"#22c55e",breeding:"#4a9eff",main:"#f59e0b",trash:"#94a3b8",deck:"#a855f7",security:"#ef4444"};
 
+  document.getElementById('prev').addEventListener('click', function(){ go(-1); });
+  document.getElementById('next').addEventListener('click', function(){ go(1); });
+  document.getElementById('arrowBtn').addEventListener('click', function(){ toggleArrow(); });
+
   function go(d) {
-    slides[cur].classList.remove('active');
-    cur = Math.max(0, Math.min(slides.length-1, cur+d));
-    slides[cur].classList.add('active');
+    allSlides[cur].classList.remove('active');
+    cur = Math.max(0, Math.min(allSlides.length-1, cur+d));
+    allSlides[cur].classList.add('active');
     document.getElementById('cur').textContent = cur+1;
     document.getElementById('prev').disabled = cur===0;
-    document.getElementById('next').disabled = cur===slides.length-1;
+    document.getElementById('next').disabled = cur===allSlides.length-1;
     window.scrollTo(0,0);
     if (arrowOn) drawArrows();
     else clearArrows();
@@ -4159,8 +4181,9 @@ ${slideDivs}
   }
 
   function drawArrows() {
-    var slide = slides[cur];
-    var movesAttr = slide.getAttribute('data-moves');
+    var slide = allSlides[cur];
+    var inner = slide.querySelector('[data-moves]');
+    var movesAttr = (inner || slide).getAttribute('data-moves');
     if (!movesAttr) { clearArrows(); return; }
     var moves;
     try { moves = JSON.parse(movesAttr); } catch(e) { clearArrows(); return; }
@@ -4382,12 +4405,19 @@ ${slideDivs}
           <button onClick={async () => {
             try {
               const json = JSON.stringify(tree);
-              const encoded = btoa(unescape(encodeURIComponent(json)));
-              const url = `${location.origin}${location.pathname}?share=${encoded}`;
+              // gzip圧縮
+              const stream = new CompressionStream('gzip');
+              const writer = stream.writable.getWriter();
+              writer.write(new TextEncoder().encode(json));
+              writer.close();
+              const compressed = await new Response(stream.readable).arrayBuffer();
+              const bytes = new Uint8Array(compressed);
+              const base64 = btoa(String.fromCharCode(...bytes));
+              const url = `${location.origin}${location.pathname}?share=${encodeURIComponent(base64)}`;
               await navigator.clipboard.writeText(url);
-              alert("URLをコピーしました！");
+              alert(`URLをコピーしました！\n文字数：${url.length}`);
             } catch(e) {
-              alert("コピーに失敗しました");
+              alert("コピーに失敗しました: " + e.message);
             }
           }} style={{
             background: "#0f1a28", border: "1px solid #22c55e55",
